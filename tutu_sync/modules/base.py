@@ -6,6 +6,7 @@ class SyncModule(ABC):
     name: str
     config_paths: list[Path]
     secret_patterns: list[str]
+    exclude_patterns: list[str] = []
 
     @property
     def home(self) -> Path:

@@ -43,7 +43,33 @@ def _encrypt_secrets(module: SyncModule, identity: Optional[str] = None,
     return encrypted
 
 
-def _add_files_to_chezmoi(module: SyncModule) -> None:
+def _should_exclude(file_path: Path, exclude_patterns: list[str]) -> bool:
+    for pattern in exclude_patterns:
+        if "node_modules" in pattern and "node_modules" in file_path.parts:
+            return True
+        if ".git" in pattern and ".git" in file_path.parts:
+            return True
+        if "*.bak-" in pattern:
+            if ".bak-" in file_path.name:
+                return True
+    return False
+
+
+def _add_single_file(
+    file_path: Path, managed_paths: set[str], added: set[str], was_encrypted_this_sync: set[str]
+) -> None:
+    abs_path_str = str(file_path)
+    if abs_path_str in added:
+        return
+    added.add(abs_path_str)
+    if abs_path_str in managed_paths:
+        chezmoi_re_add(abs_path_str)
+    else:
+        is_encrypted = abs_path_str in was_encrypted_this_sync
+        chezmoi_add(abs_path_str, encrypt=is_encrypted)
+
+
+def _add_files_to_chezmoi(module: SyncModule, encrypted_this_sync: set[str]) -> None:
     managed_raw = run_chezmoi(["managed", "--format=json"], check=False)
     managed_paths: set[str] = set()
     try:
@@ -53,22 +79,19 @@ def _add_files_to_chezmoi(module: SyncModule) -> None:
         pass
 
     added: set[str] = set()
+    exclude_patterns = getattr(module, "exclude_patterns", [])
     for base_path in module.get_absolute_paths():
         if not base_path.exists():
             continue
-        for file_path in base_path.rglob("*"):
-            if not file_path.is_file():
-                continue
-            abs_path_str = str(file_path)
-            if abs_path_str in added:
-                continue
-            added.add(abs_path_str)
-
-            if abs_path_str in managed_paths:
-                chezmoi_re_add(abs_path_str)
-            else:
-                is_encrypted = file_path.suffix == ".age"
-                chezmoi_add(abs_path_str, encrypt=is_encrypted)
+        if base_path.is_file():
+            _add_single_file(base_path, managed_paths, added, encrypted_this_sync)
+        elif base_path.is_dir():
+            for file_path in base_path.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                if _should_exclude(file_path, exclude_patterns):
+                    continue
+                _add_single_file(file_path, managed_paths, added, encrypted_this_sync)
 
 
 def _git_commit_and_push(module: SyncModule) -> None:
@@ -91,17 +114,14 @@ def sync_push(
 
         if hasattr(module, "export_config") and hasattr(module, "_get_password"):
             password = module._get_password(identity)
-            if password is None:
-                raise SyncError(
-                    f"pi-sync password not set for {module.name}. Run: tutu-sync init-pi"
-                )
             module.export_config(password=password)
 
+        encrypted_paths: set[str] = set()
         if recipients:
-            _encrypt_secrets(module, identity=identity, recipients=recipients)
+            encrypted_paths = set(_encrypt_secrets(module, identity=identity, recipients=recipients))
 
         if not dry_run:
-            _add_files_to_chezmoi(module)
+            _add_files_to_chezmoi(module, encrypted_paths)
             _git_commit_and_push(module)
 
         module.post_sync()
@@ -124,10 +144,6 @@ def sync_pull(
 
         if hasattr(module, "import_config") and hasattr(module, "_get_password"):
             password = module._get_password(identity)
-            if password is None:
-                raise SyncError(
-                    f"pi-sync password not set for {module.name}. Run: tutu-sync init-pi"
-                )
             module.import_config(password=password)
 
         module.post_sync()

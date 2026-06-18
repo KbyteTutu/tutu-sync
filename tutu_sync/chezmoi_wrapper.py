@@ -42,7 +42,7 @@ def chezmoi_add(
     if template:
         args.append("--template")
     args.append(path)
-    return run_chezmoi(args).stdout
+    return run_chezmoi(args, timeout=300).stdout
 
 
 def chezmoi_re_add(path: str) -> str:
@@ -65,7 +65,7 @@ def chezmoi_status() -> str:
 
 
 def chezmoi_git(args: list[str]) -> str:
-    return run_chezmoi(["git", "--", *args]).stdout
+    return run_chezmoi(["git", "--", *args], timeout=300).stdout
 
 
 def chezmoi_source_path() -> str:
