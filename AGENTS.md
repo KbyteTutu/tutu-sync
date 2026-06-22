@@ -28,6 +28,10 @@ tutu-sync init-config      # creates ~/.config/tutu-sync/config.yaml
 tutu-sync init-ssh          # generates key, ssh-copy-id, writes ~/.ssh/config
 tutu-sync init-pi -r <age-recipient> --install  # set up pi-sync-extension
 
+# Start web server
+tutu-sync serve              # HTTP server on :8080 (status page + pull API)
+tutu-sync serve --port 9090
+
 # CLI usage
 tutu-sync --help
 tutu-sync list
@@ -47,6 +51,7 @@ tutu-sync/
 │   ├── crypto.py           # age encryption via pyrage (x25519)
 │   ├── sync_engine.py      # orchestration: encrypt → chezmoi add → git push
 │   ├── daemon.py           # polling daemon: git fetch → compare → auto-pull
+│   ├── server.py           # HTTP server: status page + pull API
 │   ├── modules/
 │   │   ├── base.py         # SyncModule ABC (name, config_paths, secret_patterns)
 │   │   ├── registry.py     # module discovery via importlib entry_points
@@ -61,6 +66,7 @@ tutu-sync/
     ├── test_cli.py
     ├── test_cli_config.py
     ├── test_config.py
+    ├── test_server.py
     └── test_sync_engine.py
 ```
 
