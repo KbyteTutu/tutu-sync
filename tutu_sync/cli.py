@@ -295,5 +295,12 @@ def init_pi_cmd(install: bool, recipient: str) -> None:
     click.echo("\nDone. Pi config will be synced via pi-sync-extension.")
 
 
+@main.command("serve")
+@click.option("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
+def serve_cmd(port: int) -> None:
+    from tutu_sync.server import run_server
+    run_server(port=port)
+
+
 if __name__ == "__main__":
     main()
