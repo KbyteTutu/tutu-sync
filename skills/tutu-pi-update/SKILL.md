@@ -9,7 +9,7 @@ description: "Sync pi agent tutu provider models in ~/.pi/agent/models.json from
 
 **原则: 模型列表完全按照端点更新。**
 
-- 模型 ID 集合只来自 `GET http://192.168.125.1:8317/v1/models`
+- 模型 ID 集合只来自 `GET http://192.168.125.11:8317/v1/models`
 - 认证 key 内置为 `tutu`
 - 不使用 web search
 - pi 的 models.json 为标准 JSON（无注释）
@@ -24,7 +24,7 @@ description: "Sync pi agent tutu provider models in ~/.pi/agent/models.json from
 
 - `~/.pi/agent/models.json` 存在
 - `providers.tu` 已配置，baseUrl、api、apiKey 正确
-- WireGuard / 内网环境可访问 `http://192.168.125.1:8317/v1/models`
+- WireGuard / 内网环境可访问 `http://192.168.125.11:8317/v1/models`
 - 临时 API key 固定使用 `tutu`
 
 ## Phase 1: Fetch Endpoint Models
@@ -35,7 +35,7 @@ description: "Sync pi agent tutu provider models in ~/.pi/agent/models.json from
 curl -sS \
   -H 'Authorization: Bearer tutu' \
   -H 'Content-Type: application/json' \
-  'http://192.168.125.1:8317/v1/models' \
+  'http://192.168.125.11:8317/v1/models' \
   -o /tmp/tutu-pi-models.json
 
 jq -r '.data[].id' /tmp/tutu-pi-models.json | sort > /tmp/tutu-pi-ids.txt
@@ -149,7 +149,7 @@ json.providers.tu.models = newModels;
 
 ```json
 "tu": {
-  "baseUrl": "http://192.168.125.1:8317/v1",
+  "baseUrl": "http://192.168.125.11:8317/v1",
   "api": "openai-completions",
   "apiKey": "tutu",
   "compat": {
@@ -174,7 +174,7 @@ jq empty ~/.pi/agent/models.json
 
 - endpoint model ID 集合 == `providers.tu.models[].id` 集合
 - 所有模型都有 `id`、`name`、`reasoning`、`input`、`contextWindow`、`maxTokens`、`cost`
-- `providers.tu.baseUrl` == `http://192.168.125.1:8317/v1`
+- `providers.tu.baseUrl` == `http://192.168.125.11:8317/v1`
 - `providers.tu.apiKey` == `tutu`
 - `providers.tu.api` == `openai-completions`
 
@@ -188,7 +188,7 @@ pi 的 models.json 是热加载的 — 编辑后不用重启，下次打开 `/mo
 ✓ tutu-pi-update 完成
 
 Endpoint:
-  http://192.168.125.1:8317/v1/models
+  http://192.168.125.11:8317/v1/models
 Provider:
   tu (pi agent)
 API key:
