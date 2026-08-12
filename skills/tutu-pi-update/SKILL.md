@@ -1,27 +1,28 @@
 ---
 name: tutu-pi-update
-description: "Sync pi agent tutu provider models in ~/.pi/agent/models.json strictly from the tutu /v1/models endpoint. New models get id-only entries (pi defaults); legacy family-default parameters are auto-repaired. Uses built-in intranet key 'tutu'. Trigger: 'tutu-pi-update', 'update pi models', 'sync pi tutu models'."
+description: "Sync pi agent tutu provider models in ~/.pi/agent/models.json strictly from the tutu /v1/models endpoint. All models default to reasoning on with a full thinkingLevelMap; legacy family-default params and bare id entries are upgraded automatically. Uses built-in intranet key 'tutu'. Trigger: 'tutu-pi-update', 'update pi models', 'sync pi tutu models'."
 ---
 
 # Tutu Pi Update
 
 从 tutu 内网 OpenAI-compatible 模型端点同步 `~/.pi/agent/models.json` 中 `providers.tu.models`。
 
-**核心原则: 模型列表完全按照端点更新; 模型参数完全信任 pi 内置默认值。**
+**核心原则: 模型列表完全按照端点更新; 标准形态 = 默认模板 (thinking 全开 + 完整级别映射); 用户精调永远保留。**
 
 - 模型 ID 集合只来自 `GET http://192.168.125.11:8317/v1/models`
 - 认证 key 内置为 `tutu`
 - 不使用 web search
 - pi 的 models.json 为标准 JSON（无注释）
-- 依据 pi 官方文档 (`docs/models.md`): 模型对象**只有 `id` 是必须的**，其余字段均有内置默认值（`name`=id、`reasoning`=false、`input`=["text"]、`contextWindow`=128000、`maxTokens`=16384、`cost` 全零）——**不猜测、不推断任何参数**
-- **新模型**: 只写 `{"id": id}`，其余参数全部交给 pi 默认值
-- **旧模式遗留修复**: 检测已有模型参数是否等于旧版本 skill 的家族默认值指纹，完全匹配 → 清理为 `{"id": id}`；参数被用户手动改过 → 完整保留
+- 依据 pi 官方文档 (`docs/models.md`): 模型对象**只有 `id` 是必须的**，其余字段均有内置默认值（`name`=id、`input`=["text"]、`contextWindow`=128000、`maxTokens`=16384、`cost` 全零）——`name`/`input`/`contextWindow`/`maxTokens`/`cost` **不写**，信任 pi 默认
+- **标准形态（新模型与未精调模型统一）**: `reasoning: true` + 完整 `thinkingLevelMap`（minimal~max 全部直通，pi 默认省略时 `xhigh`/`max` 不展示，因此显式提供）
+- **收敛逻辑**: 旧家族遗留参数、裸 `{"id": id}` 形态 → 一律升级为默认模板；用户精调（`reasoning: false`、自定义 `thinkingLevelMap`、额外参数等）→ 完整保留
 - **删除模型**: 端点已不存在的从数组中移除
 
 ## 固定参数 (勿改)
 
 - 端点: `http://192.168.125.11:8317/v1/models`
-- provider `tu`: `baseUrl: http://192.168.125.11:8317/v1`、`api: openai-completions`、`apiKey: tutu`、`compat.supportsDeveloperRole: false`、`compat.supportsReasoningEffort: false`
+- provider `tu`: `baseUrl: http://192.168.125.11:8317/v1`、`api: openai-completions`、`apiKey: tutu`
+- provider `compat`: `supportsDeveloperRole: false`、`supportsReasoningEffort: true`（必须为 true，否则 pi 不发送 `reasoning_effort`，thinking 级别无法生效；端点不支持时请求会报错，届时改为 false 并保留用户精调）
 
 ## Phase 0: Preconditions
 
@@ -94,21 +95,37 @@ const deleted = oldModels.filter(m => !endpointIds.includes(m.id)).map(m => m.id
 const kept = endpointIds.filter(id => oldMap[id]);
 ```
 
-### 3.3 新模型: 只写 id
+### 3.3 默认模板
 
-对于 endpoint 新增但配置中不存在的模型，**只写最小结构，不生成任何参数**:
+所有模型（新增 + 未精调）统一使用:
 
 ```json
-{ "id": "<endpoint-id>" }
+{
+  "id": "<endpoint-id>",
+  "reasoning": true,
+  "thinkingLevelMap": {
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max"
+  }
+}
 ```
 
-禁止添加 `name`、`reasoning`、`input`、`contextWindow`、`maxTokens`、`cost`、`thinkingLevelMap`、`compat` 等任何字段——pi 对缺省字段使用官方内置默认值（见上），猜测的数值比官方默认更危险（例如 `reasoning: true` 会给不支持 thinking 的模型发无效参数）。
+- `reasoning: true`: 默认开启思考
+- `thinkingLevelMap`: pi 思考级别直通 provider 值，`minimal`~`max` 全部可用
+- 其余字段一律不写（`name`=id、`input`=["text"]、`contextWindow`=128000、`maxTokens`=16384、`cost` 全零）
+- 若端点对某级别不支持（请求报错）→ 在该模型上手动精调 `thinkingLevelMap`（精调模型不会被覆盖）
 
-### 3.4 旧模式遗留检测与修复
+### 3.4 已有模型: 收敛到默认模板
 
-旧版本 skill 会给新模型生成"家族默认值"参数。对**已有模型**逐一做指纹比对，识别并清理旧模式遗留:
+对每个已有模型判定形态:
 
-指纹表（旧版本 skill 的家族默认值，仅用于识别，不再用于生成）:
+**形态 A — 旧家族遗留**（旧版本 skill 生成的家族默认值，指纹表匹配）→ 升级为默认模板
+
+指纹表（旧版本 skill 的家族默认值，仅用于识别）:
 
 | 家族 | reasoning | input | contextWindow | maxTokens | thinkingLevelMap | compat |
 | ------ | ----------- | ------- | --------------- | ----------- | ------------------ | -------- |
@@ -123,41 +140,46 @@ const kept = endpointIds.filter(id => oldMap[id]);
 | image | false | ["text","image"] | 32768 | 8192 | - | - |
 | default | true | ["text"] | 200000 | 32000 | - | - |
 
-判定规则（对每个已有模型）:
+**形态 B — 裸 id 形态**（`{"id": id}`，无任何参数）→ 升级为默认模板
 
-- 满足 **全部** 条件 → 旧模式遗留，清理为 `{"id": id}`:
-  - `name` 等于 `id`（旧模式恒为 id）
-  - `cost` 为全零（旧模式恒为全零）
-  - `reasoning`、`input`、`contextWindow`、`maxTokens`、`thinkingLevelMap`（缺省视为 {}）、`compat`（缺省视为 {}）与指纹表中某一行的值**完全一致**
-- 任一条件不满足 → 用户手动精调过，**完整保留原对象**
+**形态 C — 默认模板** → 保持不变
+
+**保留（用户精调）** — 出现以下任一特征即视为用户手动精调，**原样保留**:
+
+- `reasoning` 显式为 `false`（用户明确关闭思考）
+- `thinkingLevelMap` 与默认映射不同（用户自定义级别）
+- 含 `input` / `contextWindow` / `maxTokens` / `compat` / `samplingParams` 等额外字段
+- `name` ≠ `id`，或 `cost` 非全零
 
 ```javascript
 // 伪代码
-const legacyFingerprints = [...table above];
-const isLegacy = (m) =>
-  m.name === m.id &&
-  allZero(m.cost) &&
-  legacyFingerprints.some(f => {
-    const a = {reasoning:m.reasoning, input:m.input, contextWindow:m.contextWindow,
-               maxTokens:m.maxTokens, thinkingLevelMap:m.thinkingLevelMap||{},
-               compat:m.compat||{}};
-    const b = {reasoning:f.reasoning, input:f.input, contextWindow:f.contextWindow,
-               maxTokens:f.maxTokens, thinkingLevelMap:f.thinkingLevelMap||{},
-               compat:f.compat||{}};
-    return JSON.stringify(a) === JSON.stringify(b);
-  });
+const DEFAULT_TEMPLATE = {
+  reasoning: true,
+  thinkingLevelMap: { minimal:"minimal", low:"low", medium:"medium",
+                      high:"high", xhigh:"xhigh", max:"max" },
+};
+// cost 缺省（无字段）视为全零
+const allZero = (c) => !c || (c.input===0 && c.output===0 && c.cacheRead===0 && c.cacheWrite===0);
+const isUserTuned = (m) =>
+  m.reasoning === false ||
+  JSON.stringify(m.thinkingLevelMap || DEFAULT_TEMPLATE.thinkingLevelMap) !==
+    JSON.stringify(DEFAULT_TEMPLATE.thinkingLevelMap) ||
+  ['input','contextWindow','maxTokens','compat','samplingParams'].some(k => k in m) ||
+  (m.name !== undefined && m.name !== m.id) ||
+  !allZero(m.cost);
 
-const repaired = kept.filter(id => isLegacy(oldMap[id])).map(id => ({ id }));
-const preserved = kept.filter(id => !isLegacy(oldMap[id])).map(id => oldMap[id]);
+const upgraded  = kept.filter(id => !isUserTuned(oldMap[id]))
+                      .map(id => ({ id, ...DEFAULT_TEMPLATE }));
+const preserved = kept.filter(id =>  isUserTuned(oldMap[id])).map(id => oldMap[id]);
 ```
 
 ### 3.5 构建新模型数组
 
 ```javascript
 const newModels = [
-  ...repaired,                              // 旧模式遗留 → {"id": id}
+  ...upgraded,                              // A/B/C 形态 → 默认模板 (thinking true)
   ...preserved,                             // 用户精调 → 原样保留
-  ...added.map(id => ({ id })),             // 新增 → {"id": id}
+  ...added.map(id => ({ id, ...DEFAULT_TEMPLATE })),  // 新增 → 默认模板
 ];
 json.providers.tu.models = newModels;
 ```
@@ -171,7 +193,7 @@ json.providers.tu.models = newModels;
   "apiKey": "tutu",
   "compat": {
     "supportsDeveloperRole": false,
-    "supportsReasoningEffort": false
+    "supportsReasoningEffort": true
   }
 }
 ```
@@ -190,7 +212,7 @@ jq empty ~/.pi/agent/models.json
 验证一致性:
 
 - endpoint model ID 集合 == `providers.tu.models[].id` 集合
-- 新模型与已修复模型只含 `id` 字段（或含用户精调的额外字段）
+- 未精调模型 == 默认模板（含 `reasoning: true` 与完整 `thinkingLevelMap`）
 - `providers.tu.baseUrl` == `http://192.168.125.11:8317/v1`
 - `providers.tu.apiKey` == `tutu`
 - `providers.tu.api` == `openai-completions`
@@ -201,7 +223,7 @@ jq empty ~/.pi/agent/models.json
 pi --list-models tu
 ```
 
-- 应列出全部 29+ 个 `tu/...` 模型
+- 应列出全部 N 个 `tu/...` 模型，thinking 列应显示 `yes`
 - pi 的 models.json 是热加载的 — 编辑后不用重启，下次打开 `/model` 即生效
 
 ## Phase 5: Report
@@ -219,19 +241,19 @@ API key:
   tutu
 Endpoint 模型数: N
 
-新增模型 (N):
-  - model-a ({"id": ...}, 参数用 pi 默认)
+新增模型 (N) — 默认模板 (thinking true + 完整 thinkingLevelMap):
+  - model-a
   - model-b
 
-旧模式遗留修复 (N):
-  - model-x (原为 claude 家族默认值 → {"id": ...})
-  - model-y (原为 default 默认值)
+升级为默认模板 (N) — 其中旧家族遗留 X, 裸 id 形态 Y:
+  - model-x (原为 claude 家族默认值)
+  - model-y (原为 {"id": ...})
 
 删除模型 (N):
   - old-model-z
 
 保留用户精调 (N):
-  - model-w (参数非旧模式默认, 原样保留)
+  - model-w (reasoning false / 自定义 thinkingLevelMap / 额外参数)
 
 备份:
   ~/.pi/agent/models.json.bak-...
@@ -244,6 +266,7 @@ Endpoint 模型数: N
 - endpoint JSON 格式不对 → 停止并显示响应摘要
 - 没有模型 ID → 停止，不写空 models
 - 配置写入后 `jq empty` 失败 → 从备份恢复并报告错误
+- 模型请求报 thinking 相关错误 → 端点可能不支持某级别或 `reasoning_effort`，对该模型精调 `thinkingLevelMap`（或把 provider `supportsReasoningEffort` 改回 false），保留逻辑不会覆盖
 - 如果 `models.json` 不存在 → 先创建最小结构: `{"providers":{"tu":{"baseUrl":"...","api":"openai-completions","apiKey":"tutu","models":[]}}}`
 
 ## Implementation Notes
@@ -259,16 +282,16 @@ Endpoint 模型数: N
 禁止:
 
 - ❌ 使用 web search 查询模型参数
-- ❌ 给新模型生成 `name`/`reasoning`/`input`/`contextWindow`/`maxTokens`/`cost`/`thinkingLevelMap`/`compat` 等任何参数（只写 id，信任 pi 默认值）
-- ❌ 保留旧模式家族默认值参数（必须指纹检测并清理）
-- ❌ 误删用户手动精调过的模型参数（指纹不匹配 → 完整保留）
+- ❌ 给模型写 `name`/`input`/`contextWindow`/`maxTokens`/`cost`（默认模板不含这些字段，信任 pi 默认值）
+- ❌ 保留旧家族遗留参数或裸 `{"id": id}` 形态（必须升级为默认模板，thinking 全开）
+- ❌ 覆盖用户精调（`reasoning: false` / 自定义 `thinkingLevelMap` / 额外字段 → 原样保留）
 - ❌ endpoint 失败时修改配置
 - ❌ 用 opencode 的模型对象格式（pi 格式不同）
 
 推荐:
 
 - ✅ endpoint 模型 ID 集合是唯一事实来源
-- ✅ 新模型最小结构 `{"id": id}`，安全第一
-- ✅ 指纹检测区分"旧模式遗留"与"用户精调"，只清理前者
+- ✅ 默认模板统一: `reasoning: true` + 完整 `thinkingLevelMap`
+- ✅ 精调检测区分"默认形态"与"用户精调"，只升级前者
 - ✅ 先备份，再修改
-- ✅ 报告新增、修复、删除和保留的模型
+- ✅ 报告新增、升级、删除和保留的模型
