@@ -151,7 +151,7 @@ main() {
 	echo
 	echo "  下一步:"
 	echo "    1. 重新打开终端, 运行 pi 开始使用"
-	echo "    2. 已安装的 skill 可直接触发: tutu-pi-update, tutu-wg-init"
+	echo "    2. 已安装的 skill 可直接触发: tutu-pi-update, tutu-pi-ext, tutu-wg-init"
 }
 
 main "$@"
