@@ -21,7 +21,7 @@ description: "Set up or verify WireGuard wg0 for the tutu intranet (192.168.125.
 | 内网服务器 / DNS | `192.168.125.1` |
 | tutu 模型端点 (连通性探测) | `http://192.168.125.1:8317/v1/models` |
 | 服务器公钥 | `Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=` |
-| 服务器端点 | `tutu.gold:60399` |
+| 服务器端点 | `<对端地址:端口>`（**执行时手工填写**，不写死在 skill 里） |
 | AllowedIPs | `192.168.125.0/24` |
 | PersistentKeepalive | `25` |
 | 接口名 | `wg0` |
@@ -91,17 +91,25 @@ PUBLIC_KEY="$(sudo sh -c 'wg pubkey < /etc/wireguard/privatekey')"
 
 ## Phase 3: 询问 IP 并写入 wg0.conf
 
-### 3.1 向用户索要固定 IP
+### 3.1 向用户索要固定 IP 与对端端点
 
 - 要求用户在 `192.168.125.0/24` 网段内指定一个**固定 IP**（例如 `192.168.125.9`）
-- 校验格式:
+- 要求用户提供**服务器端点**（域名或 IP + UDP 端口，例如 `wg.example.com:51820`），此值由用户在执行时手工填写，skill 不预置
+- 校验 IP 格式:
 
 ```bash
 [[ "$IP" =~ ^192\.168\.125\.(25[0-4]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]?)$ ]] \
   && echo VALID || echo INVALID
 ```
 
-- 非法（不在网段、`.0`、`.255`、格式错误）→ 重新询问，不写配置
+- 校验端点格式（`host:port`，端口为 1-65535）:
+
+```bash
+[[ "$ENDPOINT" =~ ^[^:/\s]+:(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3})$ ]] \
+  && echo VALID || echo INVALID
+```
+
+- 非法（IP 不在网段、`.0`、`.255`、格式错误；端点缺端口/格式错误）→ 重新询问，不写配置
 
 ### 3.2 写入 /etc/wireguard/wg0.conf
 
@@ -123,8 +131,8 @@ PreDown = resolvectl domain wg0 ''; resolvectl dns wg0 ''
 PublicKey = Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=
 # 接受 192.168.125.0/24 网段的所有流量
 AllowedIPs = 192.168.125.0/24
-# 服务器端点
-Endpoint = tutu.gold:60399
+# 服务器端点 (用户执行时填写)
+Endpoint = $ENDPOINT
 # 保持连接活跃
 PersistentKeepalive = 25
 EOF
@@ -172,8 +180,8 @@ curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' \
 失败 → **停止**，不启用自启，报告以下排查方向:
 
 - 服务器端是否已添加该公钥 + IP（最常见原因）
-- 端点可达性: `curl -sS --max-time 5 http://tutu.gold:60399` 或 `getent hosts tutu.gold`
-- 服务器防火墙 / UDP 端口 60399
+- 端点可达性: `curl -sS --max-time 5 http://$ENDPOINT` 或 `getent hosts <端点域名>`
+- 服务器防火墙 / UDP 端口
 
 ## Phase 5: 设置开机自启
 
@@ -206,7 +214,7 @@ sudo systemctl is-enabled wg-quick@wg0    # enabled
 接口: wg0
 本机 VPN IP: 192.168.125.x/24
 公钥: <PUBLIC_KEY>   (已注册到主服务器)
-服务器端点: tutu.gold:60399
+服务器端点: $ENDPOINT (用户提供)
 握手: <最新握手时间>
 内网探测: 192.168.125.1:8317 → 200
 开机自启: enabled
@@ -219,7 +227,7 @@ sudo systemctl is-enabled wg-quick@wg0    # enabled
 - `wg` 缺失 → 安装 wireguard-tools（apt/dnf），失败停止
 - 用户 IP 非法 → 重新询问，不写配置
 - `resolvectl` 缺失/systemd-resolved 未运行 → 省略 DNS 行，提示用户
-- `tutu.gold` 无法解析或 UDP 端口不通 → 停止，提示检查 DNS/防火墙
+- 对端端点 (`host:port`) 无法解析或 UDP 端口不通 → 停止，提示检查 DNS/防火墙（端点由用户手工提供，需用户确认无误）
 - 用户未确认服务器端注册 → 不得继续测试
 - 已正常状态 → 零改动（不重启、不 rewrite 配置、不重新生成密钥）
 
@@ -239,10 +247,11 @@ sudo systemctl is-enabled wg-quick@wg0    # enabled
 - ❌ 回显或记录私钥内容
 - ❌ 在用户确认服务器端注册前继续
 - ❌ 已正常时做任何修改（含重启接口）
-- ❌ 修改固定参数（服务器公钥 / Endpoint / AllowedIPs / Keepalive）
+- ❌ 修改固定参数（服务器公钥 / AllowedIPs / Keepalive）
 
 推荐:
 
 - ✅ 私钥持久化到 `/etc/wireguard/privatekey`（600），重跑复用
+- ✅ 服务器端点由用户执行时手工填写，skill 不预置任何端点地址
 - ✅ 连通性验证通过后才启用自启
 - ✅ 交互节点（要 IP、等服务器确认）必须显式等待用户回复
