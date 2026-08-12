@@ -9,7 +9,7 @@
 # 流程:
 #   1. 安装系统工具: curl, vim, tmux, wireguard
 #   2. 部署 config/ 下的个人配置 (tmux.conf -> ~/.tmux.conf)
-#   3. 安装 pi-agent: curl -fsSL https://pi.dev/install.sh | sh
+#   3. 安装/更新 pi-agent: 已存在则 pi update + pi update --extensions, 否则 curl -fsSL https://pi.dev/install.sh | sh
 #   4. 将本项目 skills/ 下的 skill 以原名安装到 ~/.pi/agent/skills/
 #
 # 用法:
@@ -92,6 +92,14 @@ install_user_configs() {
 }
 
 install_pi_agent() {
+	if command -v pi >/dev/null 2>&1; then
+		info "已检测到 pi ($(command -v pi))，跳过安装，执行更新..."
+		pi update
+		pi update --extensions
+		ok "pi-agent 已更新: $(command -v pi)"
+		return
+	fi
+
 	info "安装 pi-agent..."
 	command -v curl >/dev/null 2>&1 || die "缺少 curl, 请先执行系统工具安装"
 	curl -fsSL https://pi.dev/install.sh | sh
