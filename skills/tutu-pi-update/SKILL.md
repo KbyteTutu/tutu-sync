@@ -1,13 +1,13 @@
 ---
 name: tutu-pi-update
-description: "Incrementally sync pi agent tutu provider models in ~/.pi/agent/models.json from the tutu /v1/models endpoint. A cache file (~/.pi/agent/tutu-pi-update.cache.json) records what this skill last wrote, so only changed models (added / removed / legacy form / failed lookup retry) get online parameter lookup; unchanged cache-hit models cost zero queries and zero writes. Model params are looked up online per real model name (prefix stripped, name normalized); fallback template applies when lookup fails; user-tuned models are preserved. Uses built-in intranet key 'tutu'. Full resync mode available. Trigger: 'tutu-pi-update', 'update pi models', 'sync pi tutu models'; full mode: 'tutu-pi-update full', '全量同步 tutu models'."
+description: "Incrementally sync pi agent tutu provider models in ~/.pi/agent/models.json from the tutu /v1/models endpoint. A cache file (~/.pi/agent/tutu-pi-update.cache.json) records what this skill last wrote, so only changed models (added / removed / legacy form / failed lookup retry) get online parameter lookup; unchanged cache-hit models cost zero queries and zero writes. Per model family only the latest two versions get online lookup; older versions fall back to the safe template without retry. Model params are looked up online per real model name (prefix stripped, name normalized); fallback template applies when lookup fails; user-tuned models are preserved. Uses built-in intranet key 'tutu'. Full resync mode available. Trigger: 'tutu-pi-update', 'update pi models', 'sync pi tutu models'; full mode: 'tutu-pi-update full', '全量同步 tutu models'."
 ---
 
 # Tutu Pi Update
 
 从 tutu 内网 OpenAI-compatible 模型端点**增量**同步 `~/.pi/agent/models.json` 中 `providers.tu.models`。
 
-**核心原则: 端点 ID 集合每次都拉取（唯一事实来源，1 次 curl）；参数查询只对变更集执行（web_search 是最贵步骤）；缓存命中且未变更的模型零查询、零写入；用户精调永远保留。**
+**核心原则: 端点 ID 集合每次都拉取（唯一事实来源，1 次 curl）；参数查询只对变更集执行（web_search 是最贵步骤），且仅限各家族**最新两个版本**（更旧版本直接回退模板，不查询不重试）；缓存命中且未变更的模型零查询、零写入；用户精调永远保留。**
 
 - 端点只返回 id，不返回能力参数 → 需要参数的模型**必须联网查询**（web_search），禁止凭训练记忆填写
 - 缓存文件记录 skill 上次写入的每个条目（深度相等比较）→ 变更检测基线
@@ -130,11 +130,30 @@ done < "$T/kept.txt"
 查询集 = added + 升级集（裸 id / 旧默认模板） + fallback 重试集
 ```
 
+查询集还要过 **Phase 3.0 家族版本上限**（每家族只查最新两个版本，其余直接回退模板）。
+
 **查询集可以为空 → Phase 3 整体跳过**（增量模式的核心收益）。
 
 ## Phase 3: 联网查询（仅查询集）
 
-对查询集中**每一个模型**执行联网查询。禁止凭训练记忆填写参数，禁止跳过查询直接写默认值。
+对查询集中**最新两个版本内**的模型执行联网查询。禁止凭训练记忆填写参数，禁止跳过查询直接写默认值。
+
+### 3.0 家族划分与版本上限（省 token 关口）
+
+查询集先按**模型家族**分组，每个家族只在线查**最新两个版本**，其余标记 **skip-old**:
+
+1. 家族 = 归一化名剥去版本与变体 token（数字版本号、`vN`/`kN`、`-pro`/`-max`/`-mini`/`-nano`/`-latest`/`-thinking`/`-agent` 等）后的基础名；同家族版本号用 `sort -V` 语义排序
+2. 取版本号最大的两个**不同版本**；属于这两个版本的模型（含变体，如 `-pro`/`-mini`）→ 在线查询；更旧版本 → **skip-old，不查询**
+3. skip-old 处置: 直接按回退模板写入（4.2），缓存 `fallback: false`——**不重试**，重试只会再次落入 skip-old，永远浪费查询
+4. 家族归属拿不准时保守处理: 判为不同家族（宁可多查，不可错漏最新版本）
+
+示例:
+
+| 查询集内模型 | 家族/版本 | 处置 |
+| ------ | ------ | ------ |
+| gpt-5.5, gpt-5.5-mini, gpt-5.4, gpt-5.3 | gpt: 5.5/5.4/5.3 | 查 5.5（含 mini）与 5.4；gpt-5.3 → skip-old |
+| claude-opus-4-6, claude-opus-4-5 | claude-opus: 4-6/4-5 | 都查（恰为最新两个版本） |
+| deepseek-v4-pro, deepseek-v3 | deepseek: 4/3 | 查 v4-pro；deepseek-v3 → skip-old |
 
 ### 3.1 归一化模型名
 
@@ -231,6 +250,7 @@ cp ~/.pi/agent/models.json \
 
 - 全量/重试时查询失败，但缓存中该 id 有 `fallback: false` 的旧条目 → 沿用旧条目，缓存标记改为 `fallback: true` 待下次重试
 - 无缓存旧值 → 回退模板 + `fallback: true`
+- **skip-old 不适用上述重试语义**: 其模板即终态，`fallback: false`，后续运行按缓存命中跳过
 
 ### 4.4 构建新模型数组
 
@@ -292,6 +312,8 @@ Endpoint: http://192.168.125.11:8317/v1/models
 Endpoint 模型数: N (本地 M)
 
 跳过·未变更缓存命中 (N):
+旧版本跳过 (N) — 未查询, 直接回退模板 (家族版本上限):
+  - model-q
 新增模型 (N) — 查询结果/回退:
   - model-a
 升级为标准形态 (N) — 裸 id X, 旧默认模板 Y:
@@ -309,9 +331,9 @@ Endpoint 模型数: N (本地 M)
 
 ## 全量模式（触发词含 full / 全量）
 
-强制刷新全部模型参数（用于怀疑上游参数已变、或增量模式长期未刷新时）:
+强制刷新模型参数（用于怀疑上游参数已变、或增量模式长期未刷新时）:
 
-- **对端点全部模型联网查询**（同 Phase 3 规则）
+- **对端点全部模型执行 3.0 家族上限 + 联网查询**（同 Phase 3 规则: 同样只查每家族最新两个版本，skip-old 维持回退模板）
 - 分类沿用 Phase 2 缓存判定: 缓存命中（条目 == 缓存）→ skill 管理 → 用新查询结果重写；不命中或含额外字段 → 用户精调 → 保留
 - 裸 id / 旧默认模板 → 升级
 - 查询失败 → 沿用缓存旧值（见 4.3），无旧值才回退
@@ -342,6 +364,7 @@ Endpoint 模型数: N (本地 M)
 禁止:
 
 - ❌ 对缓存命中的未变更模型发起联网查询或重写（增量核心，全量模式除外）
+- ❌ 对家族内最新两个版本之外的模型发起联网查询（skip-old 直接回退模板、`fallback: false` 不重试）
 - ❌ 凭训练记忆填写模型参数（查询不到 → 缓存旧值 → 回退模板）
 - ❌ 用未归一化的模型名查询
 - ❌ 给模型写 `name`/`input`/`cost`（信任 pi 默认值）
@@ -351,7 +374,8 @@ Endpoint 模型数: N (本地 M)
 
 推荐:
 
-- ✅ 端点 ID 集合每次都拉取，是唯一事实来源；参数查询只对变更集
+- ✅ 端点 ID 集合每次都拉取，是唯一事实来源；参数查询只对变更集，且仅限各家族最新两个版本
+- ✅ 家族版本排序用 `sort -V` 语义；归属存疑时判为不同家族（保守多查不漏新版）
 - ✅ 缓存 = 变更检测基线 + last-known-good 兜底 + fallback 重试标记
 - ✅ 无变更 → 不备份不写入；写入时保持条目原有顺序（新增追加末尾），人工 diff 干净
 - ✅ 归一化规则: 剥前缀 → 小写 → 空格/下划线转连字符 → 剥 -thinking/-agent 后缀
