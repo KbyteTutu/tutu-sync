@@ -37,11 +37,44 @@ description: "Unified WireGuard management for the tutu intranet (192.168.125.0/
 
 ## Phase 0: Preconditions
 
-任一不满足即停止并提示:
+### Phase 0.1: 权限与工具
 
 - **权限**: 需要 root 或 sudo（读写 `/etc/wireguard/`、`systemctl`、`wg`）
-- **wireguard-tools**: `command -v wg` 存在；缺失则安装（Debian 系 `sudo apt-get install -y wireguard-tools` / RHEL 系 `sudo dnf install -y wireguard-tools`），失败 → 停止
 - **resolvectl**: `command -v resolvectl`（仅客户端模式决定是否写入 DNS 相关 PostUp/PreDown 行）
+
+### Phase 0.2: wireguard-tools 检测与安装
+
+`wg` 缺失时**先安装再继续**——必须在 Phase 1 之前完成，角色判定依赖 `wg pubkey` 推导公钥:
+
+```bash
+command -v wg >/dev/null 2>&1 && echo WG_INSTALLED || echo WG_MISSING
+```
+
+`WG_MISSING` → 按发行版安装（此时隧道未建，走公网源；发行版识别与 init.sh 同套路）:
+
+```bash
+. /etc/os-release
+case " $ID $ID_LIKE " in
+  *" ubuntu "*|*" debian "*)
+    sudo apt-get update && sudo apt-get install -y wireguard-tools ;;
+  *" rhel "*|*" centos "*|*" fedora "*|*" rocky "*|*" almalinux "*|*" ol "*)
+    sudo dnf install -y wireguard-tools || sudo yum install -y wireguard-tools ;;
+  *) echo UNSUPPORTED_DISTRO ;;
+esac
+```
+
+- RHEL 8: wireguard-tools 在 EPEL，先 `sudo dnf install -y epel-release` 再装
+- UNSUPPORTED_DISTRO / 无网络 / 安装报错 → **停止并报告**，不进入 Phase 1（无 wg 无法判定角色）
+
+安装后复核:
+
+```bash
+command -v wg >/dev/null 2>&1 || echo INSTALL_FAILED    # → 停止
+sudo modprobe wireguard 2>/dev/null || echo KERNEL_NO_WG  # 仅提示: 内核 <5.6 无内置支持
+```
+
+- `INSTALL_FAILED` → 停止并报告
+- `KERNEL_NO_WG` 为提示级: 需 `wireguard-dkms` 或升级内核 (≥5.6 内置); 容器/宿主机共享内核时 modprobe 失败但实际可用，最终以 C4/S4 的 `wg-quick up` 结果为准
 
 ## Phase 1: 角色判定
 
@@ -424,7 +457,8 @@ sudo systemctl is-enabled wg-quick@wg0    # enabled
 ## Error Handling
 
 - 无 root/sudo → 停止，提示以 root 执行或使用 sudo
-- `wg` 缺失 → 安装 wireguard-tools（apt/dnf），失败停止
+- `wg` 缺失 → Phase 0.2 自动安装；安装失败 / 不支持发行版 / 无网络 → 停止并报告（角色判定依赖 wg，不得跳过）
+- 内核无 wireguard 支持 (`KERNEL_NO_WG`) → 提示需 `wireguard-dkms` 或升级内核 (≥5.6 内置)
 - 服务器模式判定不匹配（既非服务器又非有效客户端配置）→ 按客户端模式处理，异常时报错停止
 - 签发片段校验失败（私钥/IP 格式非法、服务器公钥/端点/AllowedIPs 与固定参数不符）→ 拒绝写盘并指出问题
 - 客户端 PEER_MISMATCH（配置指向其他服务器）→ 停止报告，不自动重写配置
