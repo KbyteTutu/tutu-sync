@@ -25,7 +25,7 @@ description: "Unified WireGuard management for the tutu intranet (192.168.125.0/
 | ------ | ----- |
 | 内网网段 | `192.168.125.0/24` |
 | 内网服务器 / DNS | `192.168.125.1` |
-| tutu 模型端点 (连通性探测) | `http://192.168.125.1:8317/v1/models` |
+| 内网连通探测 (服务器) | `ping 192.168.125.1` |
 | 服务器公钥 | `Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=` |
 | 服务器 ListenPort | `60399` |
 | 服务器端点 (客户端 Endpoint) | `tutu.gold:60399` |
@@ -306,10 +306,8 @@ sudo wg show wg0 >/dev/null 2>&1 && echo WG_UP || echo WG_DOWN
 # 3. 握手时间 (unix 秒, 0 表示从未握手)
 sudo wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}'
 
-# 4. 内网可达性 (期待 200)
-curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' \
-  -H 'Authorization: Bearer tutu' \
-  http://192.168.125.1:8317/v1/models
+# 4. 内网可达性 (期待有响应; AllowedIPs 把网段路由进隧道, 通 = 整条链路可用)
+ping -c 3 -W 2 192.168.125.1 >/dev/null 2>&1 && echo NET_OK || echo NET_FAIL
 
 # 5. 配置指向正确的服务器?
 sudo grep -q 'Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=' /etc/wireguard/wg0.conf \
@@ -320,13 +318,13 @@ sudo grep -q 'Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=' /etc/wireguard/wg0.c
 
 | 状态 | 结论 | 动作 |
 | ------ | ------ | ------ |
-| CONFIG_OK + WG_UP + 握手在最近 3 分钟内 + curl 200 + PEER_OK | 一切正常 | **不做任何改动**，按 C6 摘要格式输出报告，结束 |
+| CONFIG_OK + WG_UP + 握手在最近 3 分钟内 + NET_OK + PEER_OK | 一切正常 | **不做任何改动**，按 C6 摘要格式输出报告，结束 |
 | CONFIG_OK + PEER_MISMATCH | 配置指向其他服务器 | **停止并报告**（重启无济于事），与用户确认后决定是否重写配置（重写需回服务器重新签发） |
-| CONFIG_OK + WG_UP + PEER_OK + 握手过期或 curl 非 200 | 隧道异常 | `sudo systemctl restart wg-quick@wg0` 后重测；仍失败 → 报告错误停止，不重建配置 |
+| CONFIG_OK + WG_UP + PEER_OK + 握手过期或 NET_FAIL | 隧道异常 | `sudo systemctl restart wg-quick@wg0` 后重测；仍失败 → 报告错误停止，不重建配置 |
 | CONFIG_OK + WG_DOWN | 已配置未运行 | 复用配置，从 **Phase C4** 继续（跳过 C2/C3） |
 | NO_CONFIG | 未配置 | 从 **Phase C2** 继续（主服务器签发流程） |
 
-PEER_MISMATCH 优先判定（无论握手/curl 结果如何，公钥不对就不是本内网的隧道）。
+PEER_MISMATCH 优先判定（无论握手/ping 结果如何，公钥不对就不是本内网的隧道）。
 
 ### Phase C2: 引导到主服务器签发（不在本机生成密钥）
 
@@ -399,22 +397,20 @@ sleep 3
 sudo wg show wg0
 sudo wg show wg0 latest-handshakes
 
-# 内网可达性: 期待 200
-curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' \
-  -H 'Authorization: Bearer tutu' \
-  http://192.168.125.1:8317/v1/models
+# 内网可达性: 期待有响应
+ping -c 3 -W 2 192.168.125.1 >/dev/null 2>&1 && echo NET_OK || echo NET_FAIL
 ```
 
 验收（全部满足才算通过）:
 
 - 接口 `wg0` 状态 `up`，Address 为配置的 IP
 - peer 出现握手，时间在最近 3 分钟内
-- curl 返回 `200`
+- 内网可达: `ping 192.168.125.1` 有响应（NET_OK）
 
 失败 → **停止**，不启用自启，报告排查方向:
 
 - 服务器端是否已注册该公钥 + IP（最常见原因）
-- 端点解析: `getent hosts tutu.gold`（UDP 端口无法用 curl/TCP 探测，勿尝试）
+- 端点解析: `getent hosts tutu.gold`（UDP 端口无法用 TCP 工具探测，勿尝试）
 - 服务器防火墙 / UDP 端口
 
 ### Phase C5: 设置开机自启
@@ -433,8 +429,7 @@ sudo systemctl is-enabled wg-quick@wg0   # 期待 enabled
 ```bash
 sudo wg show wg0                # up / Address / peer / 握手
 sudo awk -F' = ' '/^PrivateKey/{print $2}' /etc/wireguard/wg0.conf | wg pubkey   # 本机公钥(报告用)
-curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' \
-  -H 'Authorization: Bearer tutu' http://192.168.125.1:8317/v1/models   # 200
+ping -c 3 -W 2 192.168.125.1 >/dev/null 2>&1 && echo NET_OK || echo NET_FAIL
 sudo systemctl is-enabled wg-quick@wg0    # enabled
 ```
 
@@ -449,7 +444,7 @@ sudo systemctl is-enabled wg-quick@wg0    # enabled
 公钥: <PUBLIC_KEY>   (已注册到主服务器)
 服务器端点: tutu.gold:60399
 握手: <最新握手时间>
-内网探测: 192.168.125.1:8317 → 200
+内网探测: ping 192.168.125.1 → NET_OK
 开机自启: enabled
 配置: /etc/wireguard/wg0.conf (600)
 ```
@@ -480,7 +475,7 @@ sudo systemctl is-enabled wg-quick@wg0    # enabled
 - `awk`/`sed`: 服务器修改/删除时精准定位目标 peer 块；解析 nickname/IP 清单
 - `sudo cp`: 服务器写入前备份 `wg0.conf.bak-<时间戳>`
 - `systemctl`: 启动、重启、自启
-- `curl`: 内网可达性探测（复用 tutu 模型端点 + 内置 key `tutu`）
+- `ping`: 内网可达性探测（探服务器 192.168.125.1, 不绑定任何具体服务）
 
 禁止:
 
