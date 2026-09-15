@@ -11,6 +11,7 @@
 #   2. 部署 config/ 下的个人配置 (tmux.conf -> ~/.tmux.conf)
 #   3. 安装/更新 pi-agent: 已存在则 pi update + pi update --extensions, 否则 curl -fsSL https://pi.dev/install.sh | sh
 #   4. 将本项目 skills/ 下的 skill 以原名安装到 ~/.pi/agent/skills/
+#   5. 将本项目 extensions/ 下的扩展以原名安装到 ~/.pi/agent/extensions/
 #
 # 用法:
 #   bash init.sh            # 普通用户执行, 系统包安装自动走 sudo
@@ -133,6 +134,29 @@ install_skills() {
 	ok "已安装 $n 个 skill 到 $dst"
 }
 
+install_extensions() {
+	local src="$REPO_DIR/extensions"
+	local dst="$HOME/.pi/agent/extensions"
+	[[ -d "$src" ]] || die "项目 extensions 目录不存在: $src"
+	mkdir -p "$dst"
+	local n=0
+	for ext_dir in "$src"/*/; do
+		[[ -d "$ext_dir" ]] || continue
+		local name
+		name="$(basename "$ext_dir")"
+		if [[ ! -f "$ext_dir/index.ts" ]]; then
+			info "跳过 $name (缺少 index.ts)"
+			continue
+		fi
+		rm -rf "${dst:?}/$name" # 覆盖旧版本, 避免残留过期文件
+		cp -R "$ext_dir" "${dst:?}/$name"
+		info "已安装扩展: $name"
+		n=$((n + 1))
+	done
+	[[ $n -gt 0 ]] || die "extensions/ 下没有可安装的扩展"
+	ok "已安装 $n 个扩展到 $dst (新 pi 会话自动加载)"
+}
+
 main() {
 	local family
 	family="$(detect_family)"
@@ -146,12 +170,14 @@ main() {
 	install_user_configs
 	install_pi_agent
 	install_skills
+	install_extensions
 
 	ok "初始化完成"
 	echo
 	echo "  下一步:"
 	echo "    1. 重新打开终端, 运行 pi 开始使用"
 	echo "    2. 已安装的 skill 可直接触发: tutu-pi-update, tutu-pi-ext, tutu-wg-init"
+	echo "    3. share 工具 (share_upload 等) 新会话自动可用 (需 wg0 内网, 见 tutu-wg-init)"
 }
 
 main "$@"
