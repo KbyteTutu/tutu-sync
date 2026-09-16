@@ -282,7 +282,7 @@ print('200', end='')
         model = sync.apply_patch(base, sync.catalog_patch(dict(row, id='x')))
         self.assertEqual(model['name'], 'Vendor: X Pro')
         self.assertEqual(model['cost'], {'input': 2, 'output': 10, 'cacheRead': 0.2,
-                                         'tiers': [{'input': 9}]})
+                                         'cacheWrite': 0, 'tiers': [{'input': 9}]})
         self.assertEqual(sync.apply_patch(base, sync.catalog_patch({'id': 'x'})), base)
         warnings = []
         patch = sync.catalog_patch(
@@ -316,6 +316,23 @@ print('200', end='')
             self.assertEqual(row['cost'], {'input': 1.5, 'output': 3,
                                            'cacheRead': 0.1, 'cacheWrite': 2})
             self.assertEqual(sync.run(home, ep, cat)['status'], 'unchanged')
+
+    def test_partial_cost_repaired_even_on_cache_hit_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            broken = {'id': 'a', 'cost': {'input': 1}, 'contextWindow': 100}
+            (home / 'models.json').write_text(json.dumps(
+                {'providers': {'tu': {'models': [broken]}}}))
+            (home / 'tutu-pi-update.cache.json').write_text(json.dumps(
+                {'syncedAt': 't', 'models': {'a': {'model': broken, 'fallback': False}}}))
+            ep = {'data': [{'id': 'a'}]}
+            result = sync.run(home, ep, {'models': []})  # Catalog empty: cache-hit path.
+            self.assertEqual(result['status'], 'updated')
+            saved = json.loads((home / 'models.json').read_text())['providers']['tu']['models'][0]
+            self.assertEqual(saved['cost'], {'input': 1, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0})
+            cache = json.loads((home / 'tutu-pi-update.cache.json').read_text())['models']['a']['model']
+            self.assertEqual(cache['cost']['cacheWrite'], 0)
+            self.assertEqual(sync.run(home, ep, {'models': []})['status'], 'unchanged')
 
     def test_false_reasoning_with_malformed_levels_fails_cleanly(self):
         with tempfile.TemporaryDirectory() as tmp:

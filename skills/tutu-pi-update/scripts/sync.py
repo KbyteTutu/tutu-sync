@@ -21,6 +21,7 @@ CATALOG = BASE + '/v0/resource/plugins/tutu-cpa-plugin/models.json'
 LEVELS = ('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
 PARAMS = {'contextWindow', 'maxTokens', 'reasoning', 'thinkingLevelMap', 'input', 'name', 'cost'}
 STANDARD = PARAMS | {'id'}
+COST_KEYS = ('input', 'output', 'cacheRead', 'cacheWrite')
 MAX_BYTES = 8 * 1024 * 1024
 
 
@@ -155,6 +156,19 @@ def fetch_json(url, token=False):
         return decode(output.read_bytes(), 'HTTP response')
 
 
+def complete_cost(model):
+    """pi schema requires all four cost keys; return a normalized copy, never mutate."""
+    cost = model.get('cost')
+    if not isinstance(cost, dict) or all(key in cost for key in COST_KEYS):
+        return model, False
+    completed = dict(cost)
+    for key in COST_KEYS:
+        completed.setdefault(key, 0)
+    normalized = dict(model)
+    normalized['cost'] = completed
+    return normalized, True
+
+
 def thinking_map(levels):
     if not isinstance(levels, list) or any(not isinstance(x, str) or not x for x in levels):
         raise SyncError('thinking levels must be a string array')
@@ -204,6 +218,9 @@ def catalog_patch(row, warnings=None):
                     raise SyncError('pricing.' + source + ': expected non-negative number')
                 # Normalize binary float artifacts (0.19999999999999998 -> 0.2), keep real values.
                 patch.setdefault('cost', {})[target] = round(value, 10)
+            if 'cost' in patch:
+                for key in COST_KEYS:
+                    patch['cost'].setdefault(key, 0)  # pi rejects partial cost objects.
     thinking = row.get('thinking')
     if thinking is not None:
         object_value(thinking, 'thinking')
@@ -288,19 +305,22 @@ def research_patch(value):
 
 def cache_entries(raw, warnings):
     if raw is None:
-        return {}
+        return {}, False
     try:
         cache = object_value(decode(raw, 'cache'), 'cache')
         entries = object_value(cache.get('models'), 'cache.models')
+        repaired = False
         for ident, entry in entries.items():
             object_value(entry, 'cache entry')
-            model = object_value(entry.get('model'), 'cache model')
+            model, changed = complete_cost(object_value(entry.get('model'), 'cache model'))
+            entry['model'] = model
+            repaired = repaired or changed
             if model.get('id') != ident or type(entry.get('fallback')) is not bool:
                 raise SyncError('invalid cache entry')
-        return entries
+        return entries, repaired
     except SyncError:
         warnings.append('cache_invalid: rebuilt from current models; custom values preserved')
-        return {}
+        return {}, False
 
 
 def build(config, entries, endpoint, catalog, results=None, full=False):
@@ -309,7 +329,8 @@ def build(config, entries, endpoint, catalog, results=None, full=False):
     providers = object_value(config.get('providers', {}), 'providers')
     provider = object_value(providers.get('tu', {}), 'providers.tu')
     object_value(provider.get('compat', {}), 'providers.tu.compat')
-    current = index_models(provider.get('models', []), 'local models')
+    current = {ident: complete_cost(model)[0]
+               for ident, model in index_models(provider.get('models', []), 'local models').items()}
     catalog_index = {}
     warnings = []
     if catalog is not None:
@@ -383,7 +404,7 @@ def run(home, endpoint=None, catalog=None, *, full=False, dry_run=False, results
         original, cache_raw = read_bytes(models_path), read_bytes(cache_path)
         config = {} if original is None else object_value(decode(original, 'models.json'), 'models.json')
         warnings = []
-        entries = cache_entries(cache_raw, warnings)
+        entries, cache_repaired = cache_entries(cache_raw, warnings)
         if live:
             try:
                 catalog = fetch_json(CATALOG)
@@ -396,8 +417,8 @@ def run(home, endpoint=None, catalog=None, *, full=False, dry_run=False, results
             report['status'] = 'needs_research'
             return report
         models_changed = updated != config
-        cache_changed = new_entries != entries or cache_raw is None or any(
-            warning.startswith('cache_invalid:') for warning in warnings)
+        cache_changed = (new_entries != entries or cache_raw is None or cache_repaired
+                         or any(warning.startswith('cache_invalid:') for warning in warnings))
         report.update(status='dry_run' if dry_run else 'updated' if models_changed or cache_changed else 'unchanged',
                       models_changed=models_changed, cache_changed=cache_changed)
         if dry_run or not (models_changed or cache_changed):
