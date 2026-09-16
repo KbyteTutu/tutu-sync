@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -303,6 +304,13 @@ def research_patch(value):
     return patch
 
 
+def digest(value):
+    """Short canonical-JSON digest so 'unchanged' is a verifiable claim, not a count."""
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                           separators=(',', ':'), allow_nan=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
 def cache_entries(raw, warnings):
     if raw is None:
         return {}, False
@@ -333,10 +341,19 @@ def build(config, entries, endpoint, catalog, results=None, full=False):
     current = {ident: complete_cost(model)[0] for ident, model in raw_current.items()}
     catalog_index = {}
     warnings = []
+    catalog_state, generated_at = 'unavailable', None
     if catalog is not None:
+        raw_stamp = catalog.get('generated_at')
+        generated_at = raw_stamp if isinstance(raw_stamp, str) else None
         try:
-            catalog_index = index_models(object_value(catalog, 'catalog').get('models'), 'catalog.models')
+            rows = object_value(catalog, 'catalog').get('models')
+            catalog_index = index_models(rows, 'catalog.models')
+            if not catalog_index:
+                raise SyncError('catalog.models is empty')
+            catalog_state = 'ok'
         except SyncError as error:
+            catalog_index = {}
+            catalog = None  # Empty/broken catalog must not masquerade as verified coverage.
             warnings.append('catalog_unavailable: ' + str(error))
     candidates = old_versions(endpoint)
     results = {} if results is None else object_value(results, 'research results')
@@ -394,6 +411,11 @@ def build(config, entries, endpoint, catalog, results=None, full=False):
               'deleted': sorted(set(current) - set(endpoint)),
               'updated': [m['id'] for m in new_models
                           if m['id'] in raw_current and m != raw_current[m['id']]],
+              'catalog': {'state': catalog_state, 'models': len(catalog_index),
+                          'generated_at': generated_at},
+              'digest': {'endpoint': digest(sorted(endpoint)),
+                         'current': digest(provider.get('models', [])),
+                         'derived': digest(new_models)},
               'actions': dict(actions), 'research': pending, 'warnings': warnings}
     return updated, new_cache, report
 
@@ -414,6 +436,7 @@ def run(home, endpoint=None, catalog=None, *, full=False, dry_run=False, results
             endpoint = fetch_json(ENDPOINT, token=True)  # Failure aborts before any data write.
         updated, new_entries, report = build(config, entries, endpoint, catalog, results, full)
         report['warnings'] = warnings + report['warnings']
+        report['degraded'] = any(warning.startswith('catalog_') for warning in report['warnings'])
         if report['research']:
             report['status'] = 'needs_research'
             return report

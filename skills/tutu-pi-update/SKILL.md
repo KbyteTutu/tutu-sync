@@ -33,6 +33,10 @@ python3 -B <技能根目录>/scripts/sync.py
 | `error` / 1 | 报告错误并停止；不得凭猜测重写配置 |
 
 有 warnings 必须简要报告。不要复述每个阶段。
+
+报告 `unchanged` 时必须附带证据：`catalog.state`、`digest.current` 与 `digest.derived`（内容级哈希，相等才是「一致」，不是数量一致）。
+`degraded=true` 时禁止宣称「CPA 已验证一致」——必须说明结论基于缓存基线、目录未核对，建议稍后重跑。
+用户质疑「无变化」时立即重跑脚本取新鲜数据比对摘要，不要争辩。
 不要再次逐条派生、运行 `jq empty` 或重复调用 `pi --list-models`。
 `/model` 会重新加载配置；列表可加载不代表模型推理请求一定成功。
 

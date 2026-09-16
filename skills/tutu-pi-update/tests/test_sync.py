@@ -335,6 +335,32 @@ print('200', end='')
             self.assertEqual(cache['cost']['cacheWrite'], 0)
             self.assertEqual(sync.run(home, ep, {'models': []})['status'], 'unchanged')
 
+    def test_empty_catalog_is_degraded_not_silent_zero_coverage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            ep = {'data': [{'id': 'a'}]}
+            sync.run(home, ep, {'models': [{'id': 'a', 'context_window': 100}]})
+            result = sync.run(home, ep, {'models': []})
+            self.assertEqual(result['status'], 'unchanged')  # Cache baseline holds...
+            self.assertTrue(result['degraded'])              # ...but must not claim verification.
+            self.assertEqual(result['catalog']['state'], 'unavailable')
+            self.assertEqual(result['actions'], {'cached': 1})
+            self.assertTrue(any('empty' in w for w in result['warnings']))
+
+    def test_digests_make_unchanged_verifiable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            ep = {'data': [{'id': 'a'}]}
+            cat = {'models': [{'id': 'a', 'context_window': 100,
+                               'display_name': 'A'}]}
+            first = sync.run(home, ep, cat)
+            self.assertNotEqual(first['digest']['current'], first['digest']['derived'])
+            second = sync.run(home, ep, cat)
+            self.assertEqual(second['digest']['current'], second['digest']['derived'])
+            self.assertEqual(second['digest']['endpoint'], first['digest']['endpoint'])
+            self.assertEqual(second['catalog']['state'], 'ok')
+            self.assertFalse(second['degraded'])
+
     def test_false_reasoning_with_malformed_levels_fails_cleanly(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(sync.SyncError):
