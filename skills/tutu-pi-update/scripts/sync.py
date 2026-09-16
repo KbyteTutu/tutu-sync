@@ -329,8 +329,8 @@ def build(config, entries, endpoint, catalog, results=None, full=False):
     providers = object_value(config.get('providers', {}), 'providers')
     provider = object_value(providers.get('tu', {}), 'providers.tu')
     object_value(provider.get('compat', {}), 'providers.tu.compat')
-    current = {ident: complete_cost(model)[0]
-               for ident, model in index_models(provider.get('models', []), 'local models').items()}
+    raw_current = index_models(provider.get('models', []), 'local models')
+    current = {ident: complete_cost(model)[0] for ident, model in raw_current.items()}
     catalog_index = {}
     warnings = []
     if catalog is not None:
@@ -392,7 +392,8 @@ def build(config, entries, endpoint, catalog, results=None, full=False):
     tu.setdefault('compat', {}).update(supportsDeveloperRole=False, supportsReasoningEffort=True)
     report = {'models': len(endpoint), 'added': sorted(set(endpoint) - set(current)),
               'deleted': sorted(set(current) - set(endpoint)),
-              'updated': [m['id'] for m in new_models if m['id'] in current and m != current[m['id']]],
+              'updated': [m['id'] for m in new_models
+                          if m['id'] in raw_current and m != raw_current[m['id']]],
               'actions': dict(actions), 'research': pending, 'warnings': warnings}
     return updated, new_cache, report
 

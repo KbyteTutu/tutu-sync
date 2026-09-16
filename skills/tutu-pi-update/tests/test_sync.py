@@ -328,6 +328,7 @@ print('200', end='')
             ep = {'data': [{'id': 'a'}]}
             result = sync.run(home, ep, {'models': []})  # Catalog empty: cache-hit path.
             self.assertEqual(result['status'], 'updated')
+            self.assertEqual(result['updated'], ['a'])  # Repair is reported, not silent.
             saved = json.loads((home / 'models.json').read_text())['providers']['tu']['models'][0]
             self.assertEqual(saved['cost'], {'input': 1, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0})
             cache = json.loads((home / 'tutu-pi-update.cache.json').read_text())['models']['a']['model']
