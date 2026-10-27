@@ -4,7 +4,7 @@ import { SERVICE_NAME, SERVICE_VERSION, type AppContext } from '../context.js';
 import type { Caller } from '../lib/auth.js';
 import { errMsg } from '../lib/log.js';
 import { modelsSyncedAt, readProvider } from '../services/pi/models.js';
-import { validateNickname } from '../services/wg/peers.js';
+import { validatePeerName } from '../services/wg/client-config.js';
 import {
   code,
   failure,
@@ -32,15 +32,13 @@ export function registerHostTools(server: McpServer, ctx: AppContext, caller: Ca
           ` · 运行: ${formatUptime(Date.now() - ctx.startedAt)}`,
       );
 
-      const wg = ctx.wg.status();
+      const wg = await ctx.wg.status();
       if (wg.available && ctx.cfg.wg) {
         try {
-          const peers = ctx.wg.list();
-          const online = peers.filter(
-            (peer) => peer.lastHandshake !== null && Date.now() - Date.parse(peer.lastHandshake) < 180_000,
-          ).length;
+          const snapshot = await ctx.wg.snapshot();
+          const online = snapshot.peers.filter((peer) => peer.status === 'running').length;
           lines.push(
-            `- WireGuard: 可用（${ctx.cfg.wg.interface} · ${peers.length} 个节点 · ${online} 个 3 分钟内握手）`,
+            `- WireGuard: 可用（${snapshot.configuration.name} · ${snapshot.peers.length} 个节点 · ${online} 个运行中，WGDashboard ${ctx.cfg.wg.dashboard.url}）`,
           );
         } catch (e) {
           lines.push(`- WireGuard: 可用但读取节点失败 — ${errMsg(e)}`);
@@ -114,19 +112,19 @@ function registerEnrollTool(server: McpServer, ctx: AppContext, caller: Caller):
       },
       annotations: { destructiveHint: true },
     },
-    ({ name, wg, ip, ttl_minutes }) => {
+    async ({ name, wg, ip, ttl_minutes }) => {
       const denied = masterOnly(caller, '签发主机凭据');
       if (denied) return denied;
       try {
-        const hostName = validateNickname(name);
-        const withWg = wg ?? ctx.wg.status().available;
+        const hostName = validatePeerName(name);
+        const withWg = wg ?? (await ctx.wg.status()).available;
         if (!withWg && ip !== undefined) return failure('未开启 wg 时不能指定 IP');
         if (withWg) {
-          const status = ctx.wg.status();
+          const status = await ctx.wg.status();
           if (!status.available) return failure(`无法签发 wg 配置: ${status.reason}`);
           if (ip !== undefined) {
             try {
-              ctx.wg.assertIpAvailable(ip);
+              await ctx.wg.assertIpAvailable(ip);
             } catch (e) {
               return failure((e as Error).message);
             }
@@ -216,16 +214,11 @@ function registerRevokeTool(server: McpServer, ctx: AppContext, caller: Caller):
         if (!remove_wg) {
           if (host.wg_ip) lines.push(`wg peer 保留: ${host.wg_ip}`);
         } else if (host.wg_ip) {
-          const status = ctx.wg.status();
-          if (!status.available) {
-            lines.push(`⚠ wg 不可用，peer 未删除（${host.wg_ip}）: ${status.reason}`);
-          } else {
-            try {
-              await ctx.wg.remove(host.wg_ip);
-              lines.push(`✓ 已删除 wg peer: ${host.wg_ip}`);
-            } catch (e) {
-              lines.push(`⚠ wg peer 删除失败（${host.wg_ip}）: ${(e as Error).message}`);
-            }
+          try {
+            await ctx.wg.remove(host.wg_ip);
+            lines.push(`✓ 已删除 wg peer: ${host.wg_ip}`);
+          } catch (e) {
+            lines.push(`⚠ wg peer 删除失败（${host.wg_ip}）: ${(e as Error).message}`);
           }
         } else {
           lines.push('该主机没有关联 wg IP');

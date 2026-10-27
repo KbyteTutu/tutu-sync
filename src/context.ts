@@ -2,10 +2,9 @@ import type Database from 'better-sqlite3';
 import type { Config } from './config.js';
 import { AuthStore } from './lib/auth.js';
 import type { Logger } from './lib/log.js';
-import { Mutex } from './lib/mutex.js';
 import { GmailService } from './services/gmail/service.js';
 import { ShareClient } from './services/share/client.js';
-import { WgManager } from './services/wg/manager.js';
+import { WgDashboard } from './services/wg/dashboard.js';
 
 export const SERVICE_NAME = 'tutu-mcp';
 export const SERVICE_VERSION = '2.0.0';
@@ -15,7 +14,7 @@ export interface AppContext {
   db: Database.Database;
   log: Logger;
   auth: AuthStore;
-  wg: WgManager;
+  wg: WgDashboard;
   share: ShareClient | null;
   gmail: GmailService | null;
   /** 生成引导命令用的对外地址，无尾斜杠 */
@@ -35,7 +34,7 @@ export function createContext(
     db,
     log,
     auth: new AuthStore(db, masterToken),
-    wg: new WgManager(cfg.wg ?? null, log, new Mutex()),
+    wg: new WgDashboard(cfg.wg ?? null, log),
     share: cfg.share ? new ShareClient(cfg.share) : null,
     gmail: cfg.gmail ? new GmailService(cfg.gmail, db, log) : null,
     publicUrl: (cfg.server.public_url ?? `http://${bindHost}:${cfg.server.port}`).replace(/\/+$/, ''),

@@ -20,21 +20,20 @@ server:
 storage:
   path: /data/tutu-mcp.db
 
-# ---- WireGuard 中心端（可选）----
-# 只有**本机就是 wg 服务器（192.168.125.1）**时才启用：容器需要
-# network_mode: host + cap_add NET_ADMIN + 挂载 /etc/wireguard。
-# 本模板默认跑在 192.168.125.11（wg 客户端），所以整段注释掉；
-# 此时 wg_* 工具报告不可用，host 签发自动不带 wg 配置。
-#
-# wg:
-#   config: /etc/wireguard/wg0.conf
-#   interface: wg0
-#   subnet: 192.168.125.0/24
-#   server_ip: 192.168.125.1
-#   server_public_key: Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=
-#   endpoint: tutu.gold:60399
-#   dns: 192.168.125.1
-#   dns_domain: "~tu"
+# ---- WireGuard（通过 WGDashboard REST API 管理）----
+# 节点的新增/删除/密钥生成/IP 分配都由 WGDashboard 完成，本服务只调 API。
+# 因此中心跑在 192.168.125.11 也能管 wg，不需要 host 网络 / NET_ADMIN / 挂载 /etc/wireguard。
+# 前提：从中心能访问 dashboard.url（默认走 wg 隧道），并在面板 Settings 最下方生成 API Key。
+wg:
+  dashboard:
+    url: http://192.168.125.1:10086
+    api_key: ${WGDASHBOARD_API_KEY}
+  # 面板里的配置名
+  configuration: wg0
+  # 客户端配置里的 Endpoint（公网域名:端口）
+  endpoint: tutu.gold:60399
+  # 客户端 resolvectl domain（*.tu 域名解析）
+  dns_domain: "~tu"
 
 # ---- pi 模型与扩展 ----
 pi:

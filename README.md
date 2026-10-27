@@ -14,7 +14,7 @@ tutu 内网 192.168.125.0/24 (wg)
    192.168.125.11  宿主 nginx :80  ──(反代 /mcp /api/enroll /init.sh /assets)──▶  127.0.0.1:60380
                                                                                   docker: tutu-mcp
                                                                                   ├─ /data  SQLite + 规范 models.json
-                                                                                  └─ wg 域: 仅当本机是 wg 服务器时启用
+                                                                                  └─ wg 域: 调 WGDashboard API（192.168.125.1:10086）
 ```
 
 ## 快速开始（内网部署，192.168.125.11）
@@ -26,6 +26,7 @@ cp config.example.yaml config.yaml    # 默认已是内网形态，按需改 sha
 chmod 600 config.yaml
 cp .env.example .env && chmod 600 .env
 openssl rand -base64 48               # 写入 TUTU_MASTER_TOKEN
+# 再填入 WGDASHBOARD_API_KEY（面板 Settings 最下方生成）
 
 docker compose up -d --build          # 只监听 127.0.0.1:60380
 sudo cp deploy/nginx-tutu-mcp.conf /etc/nginx/conf.d/tutu-mcp.conf
@@ -35,12 +36,14 @@ curl -s http://192.168.125.11/healthz
 ```
 
 唯一入口 `http://192.168.125.11/mcp`，nginx 只放行 `192.168.125.0/24` 与 `192.168.50.0/24`。
-部署形态、wg 服务器变体与安全边界见 [docs/deploy.md](docs/deploy.md)。
+wg 节点的新增/删除/轮换全部调 WGDashboard REST API（无需 host 网络 / NET_ADMIN）；
+部署形态与安全边界见 [docs/deploy.md](docs/deploy.md)。
 
 ### 2. 接入一台新主机
 
 > 内网形态下 `/init.sh` 只能从内网访问，所以新主机**先要有 wg 连通性**。
-> 全新机器的顺序是：先按 `tutu_wg_issue`（或手工）拿到 wg 配置并拉起 wg0 → 再跑 init.sh。
+> 全新机器的顺序是：先在任一已入网设备上调 `tutu_wg_issue`（走 WGDashboard）拿到 wg 配置
+> 并拉起 wg0 → 再跑 init.sh 走注册；若中心已启用 wg 域，`tutu_host_enroll` 也可以直接带回 wg 配置。
 
 在**持有 master 令牌**的会话里让 agent 调：
 

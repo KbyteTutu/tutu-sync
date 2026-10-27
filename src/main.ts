@@ -235,7 +235,7 @@ async function main(): Promise<void> {
   migrate(db);
   const ctx = createContext(config, db, log, masterToken);
 
-  const wgStatus = ctx.wg.status();
+  const wgStatus = await ctx.wg.status();
   log.info(
     `启动 ${SERVICE_NAME} v${SERVICE_VERSION} · 监听 ${config.server.host}:${config.server.port} · 对外 ${ctx.publicUrl}`,
   );

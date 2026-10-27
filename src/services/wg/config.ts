@@ -1,25 +1,21 @@
 import { z } from 'zod';
 
-/** WireGuard 中心端（wg 服务器本机）配置 */
+/**
+ * wg 域走 WGDashboard 的 REST API，而不是本机改 wg0.conf。
+ * 因此中心可以跑在任何内网机器（默认 192.168.125.11），不需要 host 网络/NET_ADMIN。
+ */
 export const WgSchema = z.object({
-  /** wg0.conf 绝对路径（compose 挂载 /etc/wireguard） */
-  config: z.string().min(1).default('/etc/wireguard/wg0.conf'),
-  /** 接口名 */
-  interface: z
-    .string()
-    .regex(/^[a-z0-9_]{1,15}$/, '接口名只能是小写字母/数字/下划线')
-    .default('wg0'),
-  /** 内网网段 */
-  subnet: z.string().min(1).default('192.168.125.0/24'),
-  /** wg 服务器自身的内网 IP */
-  server_ip: z.string().min(1).default('192.168.125.1'),
-  /** 服务器公钥（客户端配置里的 Peer.PublicKey） */
-  server_public_key: z.string().min(1),
-  /** 客户端 Endpoint，如 tutu.gold:60399 */
+  dashboard: z.object({
+    /** WGDashboard 地址，如 http://192.168.125.1:10086 */
+    url: z.string().url(),
+    /** WGDashboard 设置页生成的 API Key（请求头 wg-dashboard-apikey） */
+    api_key: z.string().min(1),
+  }),
+  /** WireGuard 配置名（WGDashboard 里的 Name，如 wg0） */
+  configuration: z.string().min(1).default('wg0'),
+  /** 客户端 Endpoint（客户端配置里的 Endpoint，如 tutu.gold:60399） */
   endpoint: z.string().min(1),
-  /** 客户端 DNS；null 表示不写 resolvectl hook（目标无 systemd-resolved 时） */
-  dns: z.string().nullable().default('192.168.125.1'),
-  /** 客户端 DNS 搜索域（resolvectl domain，配合 *.tu 域名） */
+  /** 客户端 resolvectl domain（*.tu 域名解析） */
   dns_domain: z.string().default('~tu'),
 });
 

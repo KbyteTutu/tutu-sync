@@ -11,48 +11,49 @@ wg 内网 192.168.125.0/24
                                                                      │
                                                           docker: tutu-mcp（bridge）
                                                             ├─ /data  SQLite + 规范 models.json
-                                                            └─ wg 域: 默认关闭
+                                                            └─ wg 域 ──HTTP──▶ WGDashboard 192.168.125.1:10086
 ```
 
 - **入口**：`http://192.168.125.11/mcp`。容器只绑宿主回环，nginx 做路径反代，
   端口不暴露到 LAN/公网；nginx 层用 `allow 192.168.125.0/24; allow 192.168.50.0/24; deny all;` 兜底。
   配置在 [deploy/nginx-tutu-mcp.conf](../deploy/nginx-tutu-mcp.conf)。
-- **默认不启用 wg 域**：`192.168.125.11` 是 wg 客户端，不是服务器。`config.example.yaml`
-  里的 `wg:` 整段默认注释；`tutu_host_enroll` 会自动按“wg 域是否可用”决定是否签发 wg 配置。
-- **新主机的顺序**：内网入口只能在 wg 建立后访问，所以全新机器要先拿到 wg 配置并拉起
-  `wg0`（`tutu_wg_issue` 需在 wg 服务器那台实例上调用，或手工加 peer），再跑 `init.sh` 走注册。
+- **wg 域走 WGDashboard REST API**：节点的新增/删除/密钥生成/IP 分配/配置落盘/热应用
+  全部由面板完成，本服务只发 HTTP 请求（请求头 `wg-dashboard-apikey`）。
+  因此中心不需要 host 网络、NET_ADMIN、也不挂载 `/etc/wireguard`。
+- **新主机的顺序**：内网入口只能在 wg 建立后访问，所以全新机器先在任一已入网设备上
+  `tutu_wg_issue` 拿到 wg 配置并拉起 `wg0`，再跑 `init.sh` 走注册；
+  若 wg 域可用，`tutu_host_enroll` 也会在兑换时带回 wg 配置。
 
-### 变体：中心跑在 wg 服务器（192.168.125.1，需要 wg 域）
-
-在 `config.yaml` 打开 `wg:` 段，并把 compose 改成：
+### WGDashboard 接入要点
 
 ```yaml
-    network_mode: host        # 删掉 ports 段（二者互斥）
-    cap_add: [NET_ADMIN]
-    volumes:
-      - /etc/wireguard:/etc/wireguard
-      - ./data:/data
-      - ./config.yaml:/app/config/config.yaml:ro
+wg:
+  dashboard:
+    url: http://192.168.125.1:10086
+    api_key: ${WGDASHBOARD_API_KEY}
+  configuration: wg0
+  endpoint: tutu.gold:60399
+  dns_domain: "~tu"
 ```
 
-此时 `server.host` 可改为 `192.168.125.1`（或保留 127.0.0.1 + nginx），
-新主机可以直接从 `http://192.168.125.1/...` 引导并在兑换时拿到 wg 配置。
-如果还需要公网可达（新机器在无 wg 时也能引导），把 nginx 换成带 TLS 的公网 vhost，
-注意 WAF 放行 SSE（见第 3 节）。
+- API Key 在面板 **Settings 最下方**启用并创建；只放在 `.env`（600）。
+- 面板 API 会返回节点私钥（用于导出客户端配置），本服务只在 `tutu_wg_issue` /
+  `tutu_wg_rotate` 的返回中展示目标节点的私钥，列表工具不返回私钥。
+- 请求走 wg 隧道（`192.168.125.1`），不经过公网；若面板本身对公网明文暴露，
+  那是面板侧的风险，建议只监听 wg 地址或加 TLS 反代。
+- 面板不可达时 `wg_*` 工具报 `WireGuard 不可用: …`，其余域不受影响。
 
 ## 2. 容器权限
 
-| 配置 | 内网形态（默认） | wg 服务器变体 |
+| 配置 | 需要 | 原因 |
 | --- | --- | --- |
-| `ports: 127.0.0.1:60380:60380` | 需要（只给 nginx 用） | 删除，改 `network_mode: host` |
-| `network_mode: host` | 不需要 | 需要（看到宿主 `wg0`） |
-| `cap_add: NET_ADMIN` | 不需要 | 需要（`wg syncconf`） |
-| `/etc/wireguard` 挂载 | 不需要 | 需要（读写 `wg0.conf`） |
-| `/data` | 需要 | 需要 |
+| `ports: 127.0.0.1:60380:60380` | 是 | 只给宿主 nginx 用 |
+| `network_mode: host` | 否 | wg 由面板管理，容器不需要看宿主接口 |
+| `cap_add: NET_ADMIN` | 否 | 同上；故意不给，降低被攻破后的影响面 |
+| `/etc/wireguard` 挂载 | 否 | 同上 |
+| `/data` | 是 | SQLite（令牌摘要/注册码/邮件缓存）+ 规范 models.json |
 
-内网形态故意不给 NET_ADMIN：容器被攻破也拿不到宿主网络配置权限。
-wg 变体的写入采用「校验 → 备份 → 临时文件 fsync → rename → 目录 fsync」，
-运行态用 `wg syncconf` 热应用（不重启接口、不断既有 peer），写后回读 `wg show` 校验。
+镜像内以 root 运行仅因为 `/data` 需要 0700 归属；网络侧没有任何特权。
 
 ## 3. nginx 关键点
 
@@ -94,13 +95,11 @@ docker compose logs -f --tail=50
 ```bash
 # 状态（令牌摘要 + 注册码 + 邮件缓存 + 规范模型）
 docker compose exec tutu-mcp tar czf - /data > tutu-mcp-data.tgz
-# wg 变体才有：wg 配置
-sudo cp /etc/wireguard/wg0.conf /path/to/backup/
 ```
 
 丢失 `/data` 的后果：所有 host 令牌与注册码失效（各主机需重新 `tutu_host_enroll`），
 邮件缓存丢失（可重新拉取），模型规范版可重新 `tutu_pi_models` 生成。
-wg 配置独立于容器，不受影响。
+wg 节点由 WGDashboard 持有，不在 `/data` 里，不受影响。
 
 ## 7. 故障排查
 
@@ -110,7 +109,9 @@ wg 配置独立于容器，不受影响。
 | 403 | 来源 IP 不在 `192.168.125.0/24` / `192.168.50.0/24` 白名单 |
 | 新主机 `init.sh` 兑换 401 | 注册码是否已用过/超时（15 分钟）；`tutu_host_enroll` 重新签发 |
 | 新主机连不上 `/init.sh` | 内网形态要求先有 wg 连通性；先签发 wg 配置并拉起 `wg0` |
-| `tutu_wg_*` 报不可用 | 默认内网形态未启用 wg 域（正常）；要管 wg 需部署到 wg 服务器变体 |
+| `tutu_wg_*` 报不可用 | `tutu_host_status` 的原因：`WGDASHBOARD_API_KEY` 未设 / 面板不可达 / 配置名不对 / API Key 失效 |
+| `tutu_wg_issue` 报 IP 已被占用 | 面板里已有同 IP 节点；换 IP 或先删除旧节点 |
+| `tutu_wg_rotate` 失败后节点消失 | 面板不支持改私钥，轮换是删除+重建；重建失败时用 `tutu_wg_issue` 重新签发 |
 | `tutu_pi_models` 报 error | CPA 端点（`192.168.125.11:8317`）是否可达；报告里的 `message` 与 `warnings` |
 | 工具调用超时 | 反代 `proxy_buffering off`、超时 ≥ 300s；WAF 是否拦截 SSE |
 | 容器起不来 | `docker compose logs tutu-mcp`；缺 `TUTU_MASTER_TOKEN` 会直接报错退出 |
