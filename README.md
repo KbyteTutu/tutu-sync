@@ -91,8 +91,10 @@ bash -c "$(curl -fsSL http://192.168.125.11/init.sh)"
 | `tutu_share_list` | 全部 | 已分享文件与公网链接 |
 | `tutu_share_delete` | master | 删除文件并撤链 |
 | `tutu_share_mkdir` | master | 建目录 |
-| `tutu_gmail_sync` | master | 立即拉取并分析新邮件（服务本身定时执行） |
-| `tutu_gmail_list` / `get` / `search` | master | 查询已分析邮件（正文属敏感数据） |
+| `tutu_gmail_sync` | master | 立即增量拉取并落库（不分析；定时任务每 30m 自动执行） |
+| `tutu_gmail_digest` | master | 按需处理增量未处理邮件：本地规则初筛（≥80% 置信度）→ 只把拿不准的交给 LLM，返回有价值摘要；全为垃圾时明确“无有价值信息” |
+| `tutu_gmail_stats` | master | 清单/待处理/垃圾数（本地 vs LLM）/LLM 调用与 token/模型/分类/水位 |
+| `tutu_gmail_list` / `get` / `search` | master | 查询本地清单（含未处理、本地过滤来源） |
 
 ### 为什么有些动作只返回“产物”由本机执行
 

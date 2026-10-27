@@ -116,3 +116,23 @@ wg 节点由 WGDashboard 持有，不在 `/data` 里，不受影响。
 | 工具调用超时 | 反代 `proxy_buffering off`、超时 ≥ 300s；WAF 是否拦截 SSE |
 | 容器起不来 | `docker compose logs tutu-mcp`；缺 `TUTU_MASTER_TOKEN` 会直接报错退出 |
 | 端口被占用 | 本机 80 已由 nginx 占用，tutu-mcp 只监听 127.0.0.1:60380 |
+
+## 8. 邮件域（拉取与分析分离）
+
+- `tutu_gmail_sync`：只做增量拉取与落库。水位逐封推进（`uidvalidity + last_uid`），
+  清单主键 `(uidvalidity, uid)` 保证不重复入库；定时器每 `gmail.fetch.interval` 自动拉取。
+- **不主动分析**：没有 MCP 调用时不会消耗 LLM。
+- `tutu_gmail_digest`：按需处理未处理邮件，两级过滤：
+  1. 本地规则（零 token）：`List-Unsubscribe` / `List-Id`、`Precedence: bulk`、
+     `Auto-Submitted`、`Feedback-ID`、ESP 专有头（Mailchimp/SFMC/Klaviyo/SendGrid…），
+     加发件人、主题与**完整正文**（入库上限 20k 字）的关键词规则；
+     多个独立证据用 noisy-OR 合成置信度，**≥80% 才直接判定为垃圾/通知**。
+  2. 置信度 <80% 的邮件才交给 LLM 生成摘要。
+- 主题含账单/发票/付款/安全提醒/登录等「需关注」内容的，即使带批量头也**强制走 LLM**，
+  避免被本地规则误杀；验证码、物流类归为通知并跳过。
+- 单次调用有 45s 时间预算，返回剩余待处理数；agent 重复调用即可清空积压。
+- `tutu_gmail_stats` 拆分统计：LLM 分析封数、本地初筛过滤封数、垃圾邮件（本地/LLM 分解）、
+  LLM 调用次数与 prompt/completion/total tokens、实际使用的模型、分类分布与同步水位。
+
+Gmail 分类标签（促销/社交/更新）**不通过 IMAP 暴露**，因此没有作为初筛信号；
+规则参考 SpamAssassin 的 HEADER/BULK 思路，不引入额外依赖。

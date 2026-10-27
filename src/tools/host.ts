@@ -69,7 +69,7 @@ export function registerHostTools(server: McpServer, ctx: AppContext, caller: Ca
 
       lines.push(
         ctx.gmail
-          ? `- 邮件: 已配置（每 ${ctx.gmail.cfg.fetch.interval} 同步${ctx.gmail.busy ? ' · 正在同步' : ''}）`
+          ? `- 邮件: 已配置（每 ${ctx.gmail.cfg.fetch.interval} 拉取 · 待分析 ${ctx.gmail.pendingCount()}${ctx.gmail.busy ? ' · 正在处理' : ''}）`
           : '- 邮件: 未配置',
       );
       lines.push(`- 已注册主机: ${ctx.auth.listHosts().length}`);

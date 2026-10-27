@@ -3,6 +3,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser, type AddressObject } from 'mailparser';
 import { htmlToText } from 'html-to-text';
 import type { ImapConfig } from './schema.js';
+import { extractHeaders, serializeHeaders } from './headers.js';
 import { errMsg, type Logger } from '../../lib/log.js';
 
 export interface RawEmail {
@@ -16,6 +17,8 @@ export interface RawEmail {
   date: string | null;
   text: string;
   snippet: string;
+  /** 批量投递/自动通知相关邮件头（JSON，见 headers.ts） */
+  headers: string;
 }
 
 export interface MailboxInfo {
@@ -166,6 +169,7 @@ async function parseMessage(
     date: parsed.date?.toISOString() ?? null,
     text,
     snippet: text.slice(0, SNIPPET_LEN).replace(/\s+/g, ' ').trim(),
+    headers: serializeHeaders(extractHeaders(parsed.headerLines)),
   };
 }
 
