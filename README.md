@@ -1,41 +1,48 @@
 # tutu-sync 2.0 — 中心式个人 MCP 服务组
 
-一台中心服务器（Docker）跑 `tutu-mcp`，把原先散落的几个 skill 收成**一组 MCP 工具**：
-主机接入、WireGuard 内网、pi 模型与扩展、文件分享、邮件。任何一台新机器只需要装好 pi，
-用一次注册码接入，之后所有配置都通过中心服务下发与统一调用。
+一台中心服务器（Docker，跑在 wg 内的 `192.168.125.11`）提供 `tutu-mcp`，把原先散落的几个 skill
+收成**一组 MCP 工具**：主机接入、WireGuard 内网、pi 模型与扩展、文件分享、邮件。
+所有机器只连一个入口 `http://192.168.125.11/mcp`，不经过公网。
 
 ```text
-                         ┌──────────────────────── 中心服务器 (tutu.gold) ───────────────────────┐
-                         │  docker: tutu-mcp (network_mode: host + NET_ADMIN)                    │
-  新主机 / 手机          │    POST /mcp        MCP Streamable HTTP（Bearer 令牌）                │
-      │  init.sh         │    POST /api/enroll 一次性注册码兑换（单次、15 分钟 TTL）              │
-      ├─────── HTTPS ───▶│    GET  /init.sh    引导脚本（自带中心地址）                           │
-      │  一次注册码       │    GET  /assets/*   tmux.conf / AGENTS.md / tutu-share.ts             │
-      │                  │    /etc/wireguard   挂载，wg syncconf 热应用                          │
-      │                  │    /data             SQLite（主机令牌摘要、注册码、邮件缓存）          │
-      │                  │                     规范 models.json（CPA 同步结果）                  │
-      └──── wg0 隧道 ───▶│  WireGuard 192.168.125.0/24（中心 = .1）                              │
-                         └───────────────────────────────────────────────────────────────────────┘
+tutu 内网 192.168.125.0/24 (wg)
+   pi 主机 / 手机
+      │  http://192.168.125.11/mcp        MCP Streamable HTTP（Bearer 令牌）
+      │  http://192.168.125.11/init.sh     引导脚本（自带中心地址）
+      │  http://192.168.125.11/api/enroll  一次性注册码兑换（单次、15 分钟 TTL）
+      ▼
+   192.168.125.11  宿主 nginx :80  ──(反代 /mcp /api/enroll /init.sh /assets)──▶  127.0.0.1:60380
+                                                                                  docker: tutu-mcp
+                                                                                  ├─ /data  SQLite + 规范 models.json
+                                                                                  └─ wg 域: 仅当本机是 wg 服务器时启用
 ```
 
-## 快速开始
+## 快速开始（内网部署，192.168.125.11）
 
 ### 1. 部署中心服务
 
 ```bash
-cp config.example.yaml config.yaml    # 改 public_url / wg / share / gmail
+cp config.example.yaml config.yaml    # 默认已是内网形态，按需改 share / 扩展清单
+chmod 600 config.yaml
 cp .env.example .env && chmod 600 .env
 openssl rand -base64 48               # 写入 TUTU_MASTER_TOKEN
-docker compose up -d --build
-curl -s http://127.0.0.1:60380/healthz
+
+docker compose up -d --build          # 只监听 127.0.0.1:60380
+sudo cp deploy/nginx-tutu-mcp.conf /etc/nginx/conf.d/tutu-mcp.conf
+sudo nginx -t && sudo systemctl reload nginx
+
+curl -s http://192.168.125.11/healthz
 ```
 
-对外入口由宿主机 TLS 反代提供（如 `https://mcp.tutu.gold` → `127.0.0.1:60380`），
-配置与安全边界见 [docs/deploy.md](docs/deploy.md)。
+唯一入口 `http://192.168.125.11/mcp`，nginx 只放行 `192.168.125.0/24` 与 `192.168.50.0/24`。
+部署形态、wg 服务器变体与安全边界见 [docs/deploy.md](docs/deploy.md)。
 
 ### 2. 接入一台新主机
 
-在**持有 master 令牌**的会话里（中心或任意管理机）让 agent 调：
+> 内网形态下 `/init.sh` 只能从内网访问，所以新主机**先要有 wg 连通性**。
+> 全新机器的顺序是：先按 `tutu_wg_issue`（或手工）拿到 wg 配置并拉起 wg0 → 再跑 init.sh。
+
+在**持有 master 令牌**的会话里让 agent 调：
 
 ```text
 tutu_host_enroll(name="工作笔记本")
@@ -44,8 +51,8 @@ tutu_host_enroll(name="工作笔记本")
 把返回的两段内容带到新主机：引导命令 + 一次性注册码。
 
 ```bash
-bash -c "$(curl -fsSL https://mcp.tutu.gold/init.sh)"
-# 提示时粘贴注册码；脚本会装工具、装 pi、兑换凭据、落盘配置、拉起 wg0
+bash -c "$(curl -fsSL http://192.168.125.11/init.sh)"
+# 提示时粘贴注册码；脚本会装工具、装 pi、兑换凭据、落盘配置
 ```
 
 完成后新主机自带：
@@ -57,7 +64,7 @@ bash -c "$(curl -fsSL https://mcp.tutu.gold/init.sh)"
 | `~/.pi/agent/AGENTS.md` | 中心全局约束（仅在本机缺失时写入） |
 | `~/.tmux.conf` | 中心维护的配置 |
 | `~/.pi/agent/extensions/tutu-share/` | 本机文件上传/下载扩展 |
-| `/etc/wireguard/wg0.conf` (600) | 中心签发的客户端配置（含 `.tu` 域名解析） |
+| `/etc/wireguard/wg0.conf` (600) | 仅当中心启用 wg 域时下发（含 `.tu` 域名解析） |
 
 注册码 15 分钟内有效、只能兑换一次；同名主机重注册会轮换令牌（旧令牌立即失效）。
 

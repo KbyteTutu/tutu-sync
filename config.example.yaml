@@ -1,5 +1,9 @@
 ---
-# tutu-mcp 2.0 配置模板。复制为 config.yaml 后修改。
+# tutu-mcp 2.0 配置模板
+#
+# 默认形态：wg 内网中心，跑在 192.168.125.11，由本机 nginx 暴露
+# http://192.168.125.11/mcp（见 deploy/nginx-tutu-mcp.conf）。
+#
 # - 支持 ${ENV_VAR} 插值；密钥一律走环境变量（见 .env.example）
 # - 相对路径相对本文件所在目录解析
 # - config.yaml 含敏感信息：chmod 600，不要提交
@@ -7,28 +11,30 @@
 log_level: info
 
 server:
-  # 默认只听回环，由宿主机反代（TLS）对外；仅内网使用时改成 192.168.125.1
-  host: 127.0.0.1
+  # 容器内监听；对外暴露由 compose 映射到 127.0.0.1，再由 nginx 反代，不会直接暴露到 LAN
+  host: 0.0.0.0
   port: 60380
-  # 生成引导命令用的对外地址（新主机执行 curl <public_url>/init.sh）
-  public_url: https://mcp.tutu.gold
+  # 客户端使用的地址（写进 mcp.json / init.sh 命令），必须与 nginx 入口一致
+  public_url: http://192.168.125.11
 
 storage:
   path: /data/tutu-mcp.db
 
-# ---- WireGuard 中心端 ----
-# 本机就是 wg 服务器时才配置；compose 需 network_mode: host + NET_ADMIN
-# + 挂载 /etc/wireguard。省略整段则 wg_* 工具报告不可用（其余功能正常）。
-wg:
-  config: /etc/wireguard/wg0.conf
-  interface: wg0
-  subnet: 192.168.125.0/24
-  server_ip: 192.168.125.1
-  server_public_key: Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=
-  endpoint: tutu.gold:60399
-  # 客户端 DNS hook；目标机无 systemd-resolved 时设 null（init.sh 也会自动剔除）
-  dns: 192.168.125.1
-  dns_domain: "~tu"
+# ---- WireGuard 中心端（可选）----
+# 只有**本机就是 wg 服务器（192.168.125.1）**时才启用：容器需要
+# network_mode: host + cap_add NET_ADMIN + 挂载 /etc/wireguard。
+# 本模板默认跑在 192.168.125.11（wg 客户端），所以整段注释掉；
+# 此时 wg_* 工具报告不可用，host 签发自动不带 wg 配置。
+#
+# wg:
+#   config: /etc/wireguard/wg0.conf
+#   interface: wg0
+#   subnet: 192.168.125.0/24
+#   server_ip: 192.168.125.1
+#   server_public_key: Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=
+#   endpoint: tutu.gold:60399
+#   dns: 192.168.125.1
+#   dns_domain: "~tu"
 
 # ---- pi 模型与扩展 ----
 pi:

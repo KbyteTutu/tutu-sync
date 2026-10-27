@@ -99,7 +99,10 @@ function registerEnrollTool(server: McpServer, ctx: AppContext, caller: Caller):
           .min(1)
           .max(40)
           .describe('主机名 / 用途标识（1-40 字符，禁止空白与 #），用作令牌标签与 wg peer nickname'),
-        wg: z.boolean().default(true).describe('是否同时签发 WireGuard 客户端配置（需 wg 域可用）'),
+        wg: z
+          .boolean()
+          .optional()
+          .describe('是否同时签发 WireGuard 客户端配置；省略则按中心是否启用 wg 域自动决定'),
         ip: z.string().optional().describe('指定 wg 内网 IP；省略则兑换注册码时自动分配最小空闲 IP'),
         ttl_minutes: z
           .number()
@@ -111,13 +114,14 @@ function registerEnrollTool(server: McpServer, ctx: AppContext, caller: Caller):
       },
       annotations: { destructiveHint: true },
     },
-    async ({ name, wg, ip, ttl_minutes }) => {
+    ({ name, wg, ip, ttl_minutes }) => {
       const denied = masterOnly(caller, '签发主机凭据');
       if (denied) return denied;
       try {
         const hostName = validateNickname(name);
-        if (!wg && ip !== undefined) return failure('未开启 wg 时不能指定 IP');
-        if (wg) {
+        const withWg = wg ?? ctx.wg.status().available;
+        if (!withWg && ip !== undefined) return failure('未开启 wg 时不能指定 IP');
+        if (withWg) {
           const status = ctx.wg.status();
           if (!status.available) return failure(`无法签发 wg 配置: ${status.reason}`);
           if (ip !== undefined) {
@@ -135,9 +139,9 @@ function registerEnrollTool(server: McpServer, ctx: AppContext, caller: Caller):
           `已签发一次性注册码（${ttl_minutes} 分钟内有效，仅可使用一次）`,
           '',
           `主机名: ${hostName}`,
-          wg
+          withWg
             ? `wg 内网 IP: ${ip ?? '兑换时自动分配最小空闲 IP'}（兑换注册码时才生成密钥并写入 peer）`
-            : 'wg: 不签发（仅注册 pi 主机令牌）',
+            : 'wg: 不签发（仅注册 pi 主机令牌；内网部署下新主机需先已有 wg 连通性）',
         ];
         if (existing) {
           lines.push(
