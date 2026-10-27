@@ -1,4 +1,4 @@
-# tutu-sync 2.0 — 中心式个人 MCP 服务组
+# tutu-sync 2.0 — tutu 内网 MCP 中台
 
 一台中心服务器（Docker，跑在 wg 内的 `192.168.125.11`）提供 `tutu-mcp`，把原先散落的几个 skill
 收成**一组 MCP 工具**：主机接入、WireGuard 内网、pi 模型与扩展、文件分享、邮件。

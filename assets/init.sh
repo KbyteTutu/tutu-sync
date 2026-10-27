@@ -174,7 +174,7 @@ write_pi_config() {
     "tutu-mcp": {
       "url": "${MCP_URL}/mcp",
       "headers": { "Authorization": "Bearer ${MCP_TOKEN}" },
-      "description": "tutu 中心控制面: 主机/内网/模型/分享/邮件"
+      "description": "tutu 内网 MCP 中台: 主机/内网/模型/分享/邮件"
     }
   }
 }

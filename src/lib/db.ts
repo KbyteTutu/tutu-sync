@@ -15,7 +15,7 @@ export function openDb(file: string): Database.Database {
 }
 
 /**
- * 全库表结构。hosts/enrollments 是中心控制面状态（各 pi 主机的访问令牌与一次性注册码），
+ * 全库表结构。hosts/enrollments 是中台状态（各 pi 主机的访问令牌与一次性注册码），
  * gmail_* 是邮件服务的本地缓存。
  */
 const SCHEMA = `

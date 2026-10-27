@@ -8,7 +8,7 @@ import { registerPiTools } from './tools/pi.js';
 import { registerShareTools } from './tools/share.js';
 import { registerWgTools } from './tools/wg.js';
 
-const INSTRUCTIONS = `tutu-mcp 是 tutu 个人基础设施的中心控制面。工具按域分组：host_*（主机接入）、wg_*（内网 WireGuard）、pi_*（pi 模型与扩展）、share_*（文件分享）、gmail_*（邮件）。
+const INSTRUCTIONS = `tutu-mcp 是 tutu 的内网 MCP 中台。工具按域分组：host_*（主机接入）、wg_*（内网 WireGuard）、pi_*（pi 模型与扩展）、share_*（文件分享）、gmail_*（邮件）。
 
 身份与权限：
 - master 令牌：全部工具，包含签发主机、签发/删除 wg 节点、同步模型规范版、删除分享。
