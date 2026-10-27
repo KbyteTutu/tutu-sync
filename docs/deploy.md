@@ -15,8 +15,11 @@ wg 内网 192.168.125.0/24
 ```
 
 - **入口**：`http://192.168.125.11/mcp`。容器只绑宿主回环，nginx 做路径反代，
-  端口不暴露到 LAN/公网；nginx 层用 `allow 192.168.125.0/24; allow 192.168.50.0/24; deny all;` 兜底。
+  端口不暴露到 LAN/公网；nginx 层只放行私有网段（`192.168.0.0/16`、`172.16.0.0/12`、
+  `10.0.0.0/8`，含本机 Docker 网段），其余 `deny all`，真正的访问控制仍是 Bearer 令牌。
   配置在 [deploy/nginx-tutu-mcp.conf](../deploy/nginx-tutu-mcp.conf)。
+- **compose 网段固定为 `172.16.0.0/16`**：容器内调用 `http://192.168.125.11/mcp` 时，
+  nginx 看到的是容器 IP；不固定的话 Docker 可能分配到 `192.168.x`，与 wg/LAN 白名单冲突。
 - **wg 域走 WGDashboard REST API**：节点的新增/删除/密钥生成/IP 分配/配置落盘/热应用
   全部由面板完成，本服务只发 HTTP 请求（请求头 `wg-dashboard-apikey`）。
   因此中心不需要 host 网络、NET_ADMIN、也不挂载 `/etc/wireguard`。
@@ -62,6 +65,8 @@ wg:
 - `/healthz` 不鉴权但只返回版本与 uptime；对外暴露也无敏感信息。
 - 本机 `sites-enabled/default` 已有 `listen 80 default_server`，新 vhost 用
   `server_name 192.168.125.11` 精确匹配，不修改现有站点。
+- 同宿主容器统一用 `http://192.168.125.11/mcp` 即可（compose 网段 172.16.0.0/16 已放行）；
+  也可以把 claw 容器接进 `tutu-sync_default` 网络，直接用 `http://tutu-mcp:60380/mcp` 绕过 nginx。
 - 如果走公网 TLS 反代，另加 WAF 放行规则：`text/event-stream` 不能被缓冲/拦截，
   否则表现为工具调用超时。
 
@@ -106,7 +111,7 @@ wg 节点由 WGDashboard 持有，不在 `/data` 里，不受影响。
 | 现象 | 先看 |
 | --- | --- |
 | `http://192.168.125.11/mcp` 404 | nginx vhost 未装/未 reload；或 Host 不是 `192.168.125.11`（`curl -v` 看 Host 头） |
-| 403 | 来源 IP 不在 `192.168.125.0/24` / `192.168.50.0/24` 白名单 |
+| 403 | 来源 IP 不在私有网段白名单；容器内访问时确认 compose 网段仍是 `172.16.0.0/16` |
 | 新主机 `init.sh` 兑换 401 | 注册码是否已用过/超时（15 分钟）；`tutu_host_enroll` 重新签发 |
 | 新主机连不上 `/init.sh` | 内网形态要求先有 wg 连通性；先签发 wg 配置并拉起 `wg0` |
 | `tutu_wg_*` 报不可用 | `tutu_host_status` 的原因：`WGDASHBOARD_API_KEY` 未设 / 面板不可达 / 配置名不对 / API Key 失效 |

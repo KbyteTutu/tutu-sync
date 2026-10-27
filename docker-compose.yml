@@ -42,3 +42,11 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+# 固定网段：容器内访问 http://192.168.125.11/mcp 时，nginx 需要按来源 IP 放行。
+# 不固定的话 Docker 可能分配到 192.168.x，和 wg/LAN 白名单冲突。
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.16.0.0/16
