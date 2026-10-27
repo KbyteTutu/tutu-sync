@@ -34,6 +34,34 @@ CREATE TABLE IF NOT EXISTS enrollments (
   expires_at INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS gmail_emails (
+  uidvalidity INTEGER NOT NULL,
+  uid INTEGER NOT NULL,
+  message_id TEXT,
+  from_addr TEXT,
+  from_name TEXT,
+  to_addr TEXT,
+  subject TEXT,
+  date TEXT,
+  seen INTEGER NOT NULL DEFAULT 0,
+  snippet TEXT,
+  body_text TEXT,
+  analyzed INTEGER NOT NULL DEFAULT 0,
+  analysis TEXT,
+  analysis_error TEXT,
+  fetched_at TEXT NOT NULL,
+  analyzed_at TEXT,
+  PRIMARY KEY (uidvalidity, uid)
+);
+CREATE INDEX IF NOT EXISTS idx_gmail_emails_date ON gmail_emails(date);
+CREATE INDEX IF NOT EXISTS idx_gmail_emails_analyzed ON gmail_emails(analyzed);
+
+CREATE TABLE IF NOT EXISTS gmail_sync_state (
+  mailbox TEXT PRIMARY KEY,
+  uidvalidity INTEGER NOT NULL,
+  last_uid INTEGER NOT NULL DEFAULT 0
+);
 `;
 
 export function migrate(db: Database.Database): void {
