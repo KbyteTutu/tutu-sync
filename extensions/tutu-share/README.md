@@ -33,8 +33,12 @@ LAN 端点 `192.168.50.31` 依赖路由器 DHCP 保留固定，IP 变了需同�
 
 ## 安装
 
-`init.sh` 自动安装到 `~/.pi/agent/extensions/tutu-share/`，新 pi 会话自动加载，
-已开会话可用 `/reload` 热加载。手工更新时直接覆盖该目录即可。
+本扩展是**主机本地能力**（读写本机文件），因此不由中心服务代跑：
+
+- 新主机接入时，`init.sh` 从中心 `GET /assets/tutu-share.ts` 拉取到
+  `~/.pi/agent/extensions/tutu-share/`，新 pi 会话自动加载，已开会话可用 `/reload` 热加载。
+- 手工更新：直接覆盖 `~/.pi/agent/extensions/tutu-share/index.ts`。
+- 中心侧的只读管理（列表/删除/建目录）由 MCP 工具 `tutu_share_*` 提供，与本扩展共用同一服务。
 
 ## 工具
 
@@ -46,5 +50,5 @@ LAN 端点 `192.168.50.31` 依赖路由器 DHCP 保留固定，IP 变了需同�
 | `share_delete(remote_path)` | 删除文件并撤销链接 |
 | `share_mkdir(dir)` | 建目录 |
 
-上传需本机在家庭 LAN（192.168.50.x）或 tutu 内网（wg0，见 skill `tutu-wg-init`）；
+上传需本机在家庭 LAN（192.168.50.x）或 tutu 内网（wg0，见 MCP 工具 `tutu_wg_peers`）；
 返回的下载链接固定为公网直链 `https://nas.tutu.gold`。

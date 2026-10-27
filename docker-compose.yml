@@ -1,0 +1,47 @@
+---
+# tutu-mcp 2.0 — 中心式个人 MCP 服务组
+#
+# 部署前提：本机就是 WireGuard 服务器（192.168.125.1）+ 对外 HTTPS 反代。
+#   - network_mode: host  容器共享宿主网络命名空间，才能看到 / 管理宿主上的 wg0
+#   - cap_add: NET_ADMIN  允许 wg syncconf 直接改运行态（不重启接口、不断既有 peer）
+#   - /etc/wireguard      wg0.conf 的读写挂载（改前自动备份）
+#
+# 启动:
+#   cp config.example.yaml config.yaml   # 按实际改写 server.public_url 等
+#   cp .env.example .env                 # 填 TUTU_MASTER_TOKEN 等
+#   docker compose up -d --build
+#
+# 对外暴露: 由宿主机反代把 https://<域名>/ 指向 127.0.0.1:60380（见 docs/deploy.md）。
+services:
+  tutu-mcp:
+    build: .
+    image: tutu-mcp:2.0.0
+    container_name: tutu-mcp
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    env_file:
+      # .env 不存在时也能 config/up（服务会以缺少 TUTU_MASTER_TOKEN 明确报错）
+      - path: .env
+        required: false
+    volumes:
+      - /etc/wireguard:/etc/wireguard
+      - ./data:/data
+      - ./config.yaml:/app/config/config.yaml:ro
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:60380/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

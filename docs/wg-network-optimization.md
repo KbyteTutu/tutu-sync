@@ -1,7 +1,7 @@
 # tutu 内网链路优化方案（设计稿，未实施）
 
 > 状态：方案评审中。本文档只做设计，不改任何现状。
-> 依据：2026-09-10 本机实测 + tutu-wg-init skill / tutu-share README 现有架构。
+> 依据：2026-09-10 本机实测 + 中心控制面（tutu-mcp 的 wg/share 域）/ tutu-share README 现有架构。
 
 ## 1. 现状与根因
 

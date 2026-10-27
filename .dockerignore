@@ -1,0 +1,11 @@
+.git
+.gitignore
+.pi
+.env
+data
+node_modules
+dist
+config.yaml
+*.log
+docs
+README.md

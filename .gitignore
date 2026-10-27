@@ -1,8 +1,16 @@
+node_modules/
+dist/
+data/
+config.yaml
+.env
+*.log
+.pi/
+
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 .sisyphus/
 .pytest_cache/
-dist/
 build/
+.ruff_cache/

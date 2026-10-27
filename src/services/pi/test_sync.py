@@ -7,7 +7,7 @@ from unittest.mock import patch
 import subprocess
 import os
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'sync.py'
+SCRIPT = Path(__file__).resolve().parent / 'sync.py'
 spec = importlib.util.spec_from_file_location('sync', SCRIPT)
 assert spec is not None
 sync = importlib.util.module_from_spec(spec)

@@ -1,0 +1,90 @@
+---
+# tutu-mcp 2.0 配置模板。复制为 config.yaml 后修改。
+# - 支持 ${ENV_VAR} 插值；密钥一律走环境变量（见 .env.example）
+# - 相对路径相对本文件所在目录解析
+# - config.yaml 含敏感信息：chmod 600，不要提交
+
+log_level: info
+
+server:
+  # 默认只听回环，由宿主机反代（TLS）对外；仅内网使用时改成 192.168.125.1
+  host: 127.0.0.1
+  port: 60380
+  # 生成引导命令用的对外地址（新主机执行 curl <public_url>/init.sh）
+  public_url: https://mcp.tutu.gold
+
+storage:
+  path: /data/tutu-mcp.db
+
+# ---- WireGuard 中心端 ----
+# 本机就是 wg 服务器时才配置；compose 需 network_mode: host + NET_ADMIN
+# + 挂载 /etc/wireguard。省略整段则 wg_* 工具报告不可用（其余功能正常）。
+wg:
+  config: /etc/wireguard/wg0.conf
+  interface: wg0
+  subnet: 192.168.125.0/24
+  server_ip: 192.168.125.1
+  server_public_key: Aw+eKGt/x+WmRLBvfX5fzHQLxtsuxDWhxIhYiZXbLxM=
+  endpoint: tutu.gold:60399
+  # 客户端 DNS hook；目标机无 systemd-resolved 时设 null（init.sh 也会自动剔除）
+  dns: 192.168.125.1
+  dns_domain: "~tu"
+
+# ---- pi 模型与扩展 ----
+pi:
+  # 容器内作为 HOME 的目录：规范 models.json 在 <home>/.pi/agent/models.json
+  home: /data/pi-home
+  # 新主机应安装的扩展（packages 源）
+  extensions:
+    - npm:@vigolium/piolium
+    - npm:pi-web-access
+    - npm:pi-lens
+    - npm:bigpowers
+    - npm:context-mode
+
+# ---- 文件分享代理（服务本身不归本项目部署）----
+share:
+  upload: http://192.168.125.11:60306
+  public_base: https://nas.tutu.gold
+
+# ---- 邮件（可选，默认整段注释）----
+# 启用步骤:
+#   1. 去掉下面整段的 "# " 前缀
+#   2. 在 .env 设置 GMAIL_APP_PASSWORD（Gmail 应用专用密码）与 LLM_API_KEY
+# 不启用时 gmail 工具不会注册，其余域不受影响。
+#
+# gmail:
+#   imap:
+#     host: imap.gmail.com
+#     port: 993
+#     secure: true
+#     user: your.name@gmail.com
+#     # 前置条件: Gmail 开启 IMAP + 生成应用专用密码（普通密码不可用）
+#     password: ${GMAIL_APP_PASSWORD}
+#     mailbox: INBOX
+#
+#   fetch:
+#     interval: 30m            # 定时拉取间隔
+#     initial_days: 7          # 首次运行回溯天数
+#     batch_size: 20           # 单批拉取封数
+#     max_batches_per_run: 10  # 单次同步最多批数
+#     mark_seen: false         # 拉取后是否在服务器标记已读
+#
+#   llm:
+#     # 任意 OpenAI 兼容端点
+#     base_url: https://api.deepseek.com/v1
+#     api_key: ${LLM_API_KEY}
+#     model: deepseek-chat
+#     temperature: 0.2
+#     timeout: 60s
+#     max_retries: 1
+#     max_body_chars: 8000
+#     prompt: |
+#       你是邮件分析助手。阅读下面的邮件，输出一个 JSON 对象，包含以下字段：
+#       - "summary": 一两句话概括邮件内容
+#       - "category": 邮件类别，从 [通知, 营销, 安全, 账务, 工作, 个人, 其他] 中选一个
+#       - "priority": 处理优先级，"high" / "medium" / "low"
+#       - "action_required": 布尔值，是否需要收件人采取行动
+#       - "action": 需要做什么；无需行动时为空字符串
+#       - "key_points": 字符串数组，2-5 条关键信息
+#       只输出 JSON 本身，不要输出任何其他文字或代码块标记。
